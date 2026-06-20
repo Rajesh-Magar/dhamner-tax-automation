@@ -125,7 +125,7 @@ This project is configured for automatic deployment via **Vercel**:
 
 ## 📄 License
 
-This project is built for **यशवंत ग्रामपंचायत धामणेर, ता. धामणेर, जि. जळगाव**.
+This project is built for **यशवंत ग्रामपंचायत धामणेर, ता. कोरेगाव, जि. सातारा**.
 
 ---
 

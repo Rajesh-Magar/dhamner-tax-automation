@@ -340,7 +340,7 @@ export default function HomePage() {
             <Link href="https://grampanchayatdhamner.in" target="_blank" className="hover:text-slate-400 transition-colors">ग्रामपंचायत धामणेर मुख्य संकेतस्थळ</Link>
           </div>
           <p className="text-slate-600 mt-2">
-            Developed for Grampanchayat Dhamner, District Jalgaon. Demo Version 2.0.
+            Developed for Grampanchayat Dhamner, Tal. Koregaon, Dist. Satara.
           </p>
         </div>
       </footer>

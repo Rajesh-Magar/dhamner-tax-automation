@@ -109,7 +109,7 @@ export default function ReceiptView({ isOpen, onClose, transaction, propertyData
             <div className="text-center border-b-2 border-slate-800 pb-4 mb-6">
               <h4 className="text-xs font-bold text-slate-600 tracking-wider">महाराष्ट्र शासन</h4>
               <h2 className="text-lg md:text-xl font-bold text-slate-800 mt-1">यशवंत ग्रामपंचायत धामणेर</h2>
-              <p className="text-xs text-slate-500">ता. धामणेर, जि. जळगाव, महाराष्ट्र</p>
+              <p className="text-xs text-slate-500">ता. कोरेगाव, जि. सातारा, महाराष्ट्र</p>
               <h3 className="text-sm font-extrabold text-slate-700 bg-slate-100 py-1.5 px-4 rounded-md inline-block mt-3 border border-slate-205">
                 कर भरणा पावती • TAX PAYMENT RECEIPT
               </h3>

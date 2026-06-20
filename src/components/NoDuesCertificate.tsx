@@ -85,7 +85,7 @@ export default function NoDuesCertificate({ isOpen, onClose, property }: NoDuesC
             <div className="text-center border-b-2 border-amber-600/70 pb-4 mb-8">
               <h4 className="text-xs font-bold text-slate-600 tracking-wider">महाराष्ट्र शासन</h4>
               <h2 className="text-lg md:text-xl font-bold text-slate-800 mt-1">यशवंत ग्रामपंचायत धामणेर</h2>
-              <p className="text-xs text-slate-500">ता. धामणेर, जि. जळगाव, महाराष्ट्र</p>
+              <p className="text-xs text-slate-500">ता. कोरेगाव, जि. सातारा, महाराष्ट्र</p>
               <div className="flex justify-between text-[11px] text-slate-500 mt-4 px-2">
                 <span>जा.क्र. (Ref): GP-DHAM/ND/{currentYear}/{Math.floor(1000 + Math.random() * 9000)}</span>
                 <span>दिनांक (Date): {todayDate}</span>
@@ -107,7 +107,7 @@ export default function NoDuesCertificate({ isOpen, onClose, property }: NoDuesC
               <p className="indent-8">
                 प्रमाणित करण्यात येते की, मालमत्ता क्रमांक <strong className="font-bold font-mono text-slate-900">{property.propertyNo}</strong> चे अधिकृत धारक 
                 <strong> श्री/श्रीमती {property.ownerName}</strong> {property.ownerNameEn && <span className="text-xs text-slate-500">({property.ownerNameEn})</span>}, 
-                राहणार प्रभाग क्रमांक <strong className="font-semibold text-slate-900">{property.wardNo}</strong>, धामणेर, ता. धामणेर, जि. जळगाव, यांच्या नावावर नोंदणीकृत असलेल्या मालमत्तेचे सर्व कर आर्थिक वर्ष 
+                राहणार प्रभाग क्रमांक <strong className="font-semibold text-slate-900">{property.wardNo}</strong>, धामणेर, ता. कोरेगाव, जि. सातारा, यांच्या नावावर नोंदणीकृत असलेल्या मालमत्तेचे सर्व कर आर्थिक वर्ष 
                 <strong className="font-semibold text-slate-900"> {financialYear}</strong> अखेरपर्यंत पूर्णपणे भरलेले आहेत.
               </p>
               <p className="indent-8">
