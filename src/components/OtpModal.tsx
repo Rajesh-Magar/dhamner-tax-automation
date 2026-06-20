@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useLanguage } from "@/context/LanguageContext";
 
 interface OtpModalProps {
   isOpen: boolean;
@@ -23,6 +24,9 @@ export default function OtpModal({
   const [inputOtp, setInputOtp] = useState(["", "", "", ""]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  
+  const { lang } = useLanguage();
+
   const inputRefs = [
     useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null),
@@ -88,16 +92,16 @@ export default function OtpModal({
     const enteredCode = inputOtp.join("");
 
     if (enteredCode.length !== 4) {
-      setError("कृपया ४-अंकी कोड प्रविष्ट करा.");
+      setError(lang === "mr" ? "कृपया ४-अंकी कोड प्रविष्ट करा." : "Please enter the 4-digit code.");
       return;
     }
 
     if (enteredCode !== otpCode) {
-      setError("अवैध कोड! कृपया स्क्रीनवर दाखवलेला कोड वापरा.");
+      setError(lang === "mr" ? "अवैध कोड! कृपया स्क्रीनवर दाखवलेला कोड वापरा." : "Invalid code! Please enter the code shown on the screen.");
       return;
     }
 
-    setLoading(true);
+    loading || setLoading(true);
     // Simulate API delay
     setTimeout(() => {
       onClose();
@@ -145,29 +149,38 @@ export default function OtpModal({
               🛡️
             </span>
             <h3 className="text-xl font-bold text-slate-800">
-              सुरक्षा पडताळणी
+              {lang === "mr" ? "सुरक्षा पडताळणी" : "Security Verification"}
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Security Verification
+            <p className="text-xs text-slate-400 mt-0.5 font-medium uppercase tracking-wider">
+              {lang === "mr" ? "पडताळणी कोड आवश्यक" : "Verification Required"}
             </p>
-            <p className="text-sm text-slate-500 mt-3 px-2">
-              मालमत्ता धारक <strong>{ownerName}</strong> ({propertyNo}) च्या
-              माहितीसाठी मोबाईल नंबर <strong>{maskedMobile}</strong> वर पाठवलेला
-              ४-अंकी कोड प्रविष्ट करा.
+            <p className="text-sm text-slate-500 mt-3 px-2 leading-relaxed">
+              {lang === "mr" ? (
+                <>
+                  मालमत्ता धारक <strong>{ownerName}</strong> ({propertyNo}) च्या
+                  माहितीसाठी मोबाईल नंबर <strong>{maskedMobile}</strong> वर पाठवलेला
+                  ४-अंकी कोड प्रविष्ट करा.
+                </>
+              ) : (
+                <>
+                  Please enter the 4-digit verification code sent to mobile number <strong>{maskedMobile}</strong> for owner <strong>{ownerName}</strong> ({propertyNo}).
+                </>
+              )}
             </p>
           </div>
 
           {/* Demo Alert Box with OTP */}
           <div className="mb-6 p-4 bg-amber-50 border border-amber-200/60 rounded-xl text-center">
-            <p className="text-xs text-amber-800 font-medium">
-              💡 डेमो सुरक्षा कोड (Demo Verification Code):
+            <p className="text-xs text-amber-800 font-bold">
+              {lang === "mr" ? "💡 डेमो सुरक्षा कोड:" : "💡 Demo Verification Code:"}
             </p>
             <span className="block text-2xl font-mono font-bold tracking-widest text-amber-700 mt-1">
               {otpCode}
             </span>
             <p className="text-[10px] text-amber-600 mt-1 leading-tight">
-              (खऱ्या सिस्टीममध्ये हा कोड SMS द्वारे जाईल. चाचणीसाठी वरील कोड
-              वापरा.)
+              {lang === "mr"
+                ? "(खऱ्या सिस्टीममध्ये हा कोड SMS द्वारे जाईल. चाचणीसाठी वरील कोड वापरा.)"
+                : "(In a live system, this code would be sent via SMS. Use the code above for testing.)"}
             </p>
           </div>
 
@@ -203,7 +216,7 @@ export default function OtpModal({
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3 bg-gradient-to-r from-orange-600 to-amber-500 hover:from-orange-500 hover:to-amber-400 text-white font-bold rounded-xl shadow-lg shadow-orange-500/20 active:scale-[0.99] transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full py-3 bg-gradient-to-r from-orange-600 to-amber-500 hover:from-orange-500 hover:to-amber-400 text-white font-bold rounded-xl shadow-lg shadow-orange-500/20 active:scale-[0.99] transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer text-sm"
               >
                 {loading ? (
                   <>
@@ -226,18 +239,18 @@ export default function OtpModal({
                         d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                       />
                     </svg>
-                    पडताळणी होत आहे...
+                    {lang === "mr" ? "पडताळणी होत आहे..." : "Verifying..."}
                   </>
                 ) : (
-                  "प्रवेश करा (Verify & Enter)"
+                  lang === "mr" ? "प्रवेश करा (Verify & Enter)" : "Verify & Enter"
                 )}
               </button>
               <button
                 type="button"
                 onClick={onClose}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold rounded-xl text-sm transition-colors cursor-pointer"
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-650 font-semibold rounded-xl text-xs transition-colors cursor-pointer"
               >
-                रद्द करा (Cancel)
+                {lang === "mr" ? "रद्द करा" : "Cancel"}
               </button>
             </div>
           </form>

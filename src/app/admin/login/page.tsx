@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
+import { useLanguage } from "@/context/LanguageContext";
 
 export default function AdminLogin() {
   const router = useRouter();
@@ -10,6 +12,8 @@ export default function AdminLogin() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const { lang } = useLanguage();
 
   useEffect(() => {
     // If already logged in, redirect to admin panel
@@ -41,7 +45,7 @@ export default function AdminLogin() {
 
         router.push("/admin");
       } else {
-        setError("अवैध युझरनेम किंवा पासवर्ड! कृपया पुन्हा तपासा.");
+        setError(lang === "mr" ? "अवैध युझरनेम किंवा पासवर्ड! कृपया पुन्हा तपासा." : "Invalid username or password! Please verify and try again.");
         setLoading(false);
       }
     }, 800);
@@ -55,14 +59,14 @@ export default function AdminLogin() {
         <div className="w-full max-w-md bg-white rounded-3xl border border-slate-100 shadow-xl overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200">
           <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-6 py-6 text-center">
             <span className="text-3xl mb-2 block">🔒</span>
-            <h3 className="text-xl font-bold">प्रशासक लॉगिन</h3>
+            <h3 className="text-xl font-bold">{lang === "mr" ? "प्रशासक लॉगिन" : "Admin Login"}</h3>
             <p className="text-slate-400 text-xs mt-0.5">Admin Dashboard Login</p>
           </div>
 
           <form onSubmit={handleLogin} className="p-6 md:p-8 space-y-4">
             {/* Info Box */}
             <div className="p-3.5 bg-slate-50 border border-slate-100 rounded-2xl text-[11px] text-slate-500 leading-relaxed">
-              <strong>💡 चाचणीसाठी खालील क्रेडेन्शियल्स वापरा:</strong>
+              <strong>{lang === "mr" ? "💡 चाचणीसाठी खालील क्रेडेन्शियल्स वापरा:" : "💡 Use the credentials below for testing:"}</strong>
               <div className="grid grid-cols-2 mt-1 font-mono">
                 <span>Username: admin</span>
                 <span>Password: dhamner@2026</span>
@@ -72,7 +76,7 @@ export default function AdminLogin() {
             {/* Username Input */}
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">
-                युझरनेम (Username):
+                {lang === "mr" ? "युझरनेम (Username):" : "Username:"}
               </label>
               <input
                 type="text"
@@ -87,7 +91,7 @@ export default function AdminLogin() {
             {/* Password Input */}
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">
-                पासवर्ड (Password):
+                {lang === "mr" ? "पासवर्ड (Password):" : "Password:"}
               </label>
               <input
                 type="password"
@@ -118,19 +122,17 @@ export default function AdminLogin() {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                   </svg>
-                  तपासणी होत आहे...
+                  {lang === "mr" ? "तपासणी होत आहे..." : "Verifying..."}
                 </>
               ) : (
-                "लॉगिन करा (Login)"
+                lang === "mr" ? "लॉगिन करा (Login)" : "Login"
               )}
             </button>
           </form>
         </div>
       </main>
 
-      <footer className="bg-slate-900 text-slate-400 py-6 text-center text-xs border-t border-slate-850">
-        <p>© {new Date().getFullYear()} यशवंत ग्रामपंचायत धामणेर — कर व्यवस्थापन प्रणाली</p>
-      </footer>
+      <Footer />
     </div>
   );
 }
