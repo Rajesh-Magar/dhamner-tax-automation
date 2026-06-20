@@ -1,0 +1,49 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Property {
+  id              Int           @id @default(autoincrement())
+  propertyNo      String        @unique @map("property_no")
+  ownerName       String        @map("owner_name")
+  ownerNameEn     String?       @map("owner_name_en")
+  mobileNumber    String        @map("mobile_number")
+  wardNo          Int           @map("ward_no")
+  address         String?
+  houseTaxDue     Decimal       @default(0) @map("house_tax_due") @db.Decimal(10, 2)
+  waterTaxDue     Decimal       @default(0) @map("water_tax_due") @db.Decimal(10, 2)
+  sanitaryTaxDue  Decimal       @default(0) @map("sanitary_tax_due") @db.Decimal(10, 2)
+  lightTaxDue     Decimal       @default(0) @map("light_tax_due") @db.Decimal(10, 2)
+  isActive        Boolean       @default(true) @map("is_active")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  transactions    Transaction[]
+
+  @@map("properties")
+}
+
+model Transaction {
+  id              Int       @id @default(autoincrement())
+  transactionId   String    @unique @map("transaction_id")
+  propertyNo      String    @map("property_no")
+  amountPaid      Decimal   @map("amount_paid") @db.Decimal(10, 2)
+  taxType         String    @map("tax_type")
+  paymentMethod   String    @map("payment_method")
+  paymentDate     DateTime  @default(now()) @map("payment_date")
+  financialYear   String    @map("financial_year")
+  status          String    @default("SUCCESS")
+  receiptUrl      String?   @map("receipt_url")
+  gatewayRef      String?   @map("gateway_ref")
+  recordedBy      String?   @map("recorded_by")
+  notes           String?
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  property        Property  @relation(fields: [propertyNo], references: [propertyNo])
+
+  @@map("transactions")
+}
