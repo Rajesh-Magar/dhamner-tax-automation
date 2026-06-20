@@ -96,13 +96,13 @@ export default function HomePage() {
 
       <main className="flex-1">
         {/* Hero Banner */}
-        <section className="relative overflow-hidden bg-slate-950 text-white py-16 md:py-24 px-4 flex items-center justify-center min-h-[50vh]">
+        <section className="relative overflow-hidden text-white py-16 md:py-24 px-4 flex items-center justify-center min-h-[50vh]">
           {/* Background image & dark overlay */}
           <div 
-            className="absolute inset-0 bg-cover bg-center opacity-30 mix-blend-overlay" 
+            className="absolute inset-0 bg-cover bg-center" 
             style={{ backgroundImage: "url('/Dhamner-Village-New-Final.webp')" }}
           />
-          <div className="absolute inset-0 bg-gradient-to-b from-slate-950/80 via-slate-950/70 to-slate-950" />
+          <div className="absolute inset-0 bg-black/65" />
 
           <div className="relative max-w-4xl mx-auto text-center z-10">
             <div className="inline-flex items-center gap-2 bg-orange-500/10 border border-orange-500/30 text-orange-400 px-4 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider mb-6">

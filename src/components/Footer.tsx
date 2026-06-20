@@ -8,64 +8,96 @@ export default function Footer() {
   const { t } = useLanguage();
 
   return (
-    <footer className="bg-gradient-to-b from-green-800 to-green-950 text-green-100 py-10 px-6 border-t border-green-700/30">
-      <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8 text-left">
-        {/* Column 1: Info & Links */}
-        <div className="space-y-4">
-          <div>
-            <h4 className="text-sm font-bold text-white mb-1">
+    <footer className="bg-gradient-to-b from-green-800 to-green-950 text-green-100 py-12 px-6 border-t border-white/10">
+      <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-10 text-left">
+        
+        {/* Column 1: Institutional Trust & Navigation Links */}
+        <div className="space-y-5">
+          <div className="space-y-1.5">
+            <h4 className="text-lg font-extrabold text-white tracking-tight leading-tight">
               {t("title")}
             </h4>
-            <p className="text-green-300/80 text-[11px]">
+            <p className="text-green-300 text-xs font-medium tracking-wide">
               {t("taxPortal")}
             </p>
           </div>
-          <p className="text-green-200/85 font-medium">
+          
+          <p className="text-green-200/90 text-sm font-normal leading-relaxed">
             © {new Date().getFullYear()} {t("title")} — {t("rightsReserved")}
           </p>
-          <div className="flex flex-wrap gap-4 text-green-300">
-            <Link href="/admin/login" className="hover:text-white transition-colors underline underline-offset-4">
+          
+          <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-green-300">
+            <Link 
+              href="/admin/login" 
+              className="hover:text-white transition-colors duration-250 underline underline-offset-4 cursor-pointer"
+            >
               {t("login")}
             </Link>
-            <span>•</span>
-            <Link href="https://grampanchayatdhamner.in" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors underline underline-offset-4">
+            <span className="text-green-700 font-bold">•</span>
+            <Link 
+              href="https://grampanchayatdhamner.in" 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="hover:text-white transition-colors duration-250 underline underline-offset-4 cursor-pointer"
+            >
               {t("mainSite")}
             </Link>
           </div>
-          <p className="text-green-400/80 text-[10px]">
+          
+          <p className="text-green-400 text-xs leading-relaxed font-medium">
             {t("developedFor")}
           </p>
         </div>
 
-        {/* Column 2: Contact Info */}
-        <div className="space-y-4 md:border-l md:border-green-700/40 md:pl-8 flex flex-col justify-center">
+        {/* Column 2: Official Contact Details */}
+        <div className="space-y-5 md:border-l md:border-green-700/40 md:pl-10 flex flex-col justify-center">
           <h4 className="text-xs uppercase font-extrabold tracking-wider text-amber-400">
-            {t("email") === "Email" ? "Contact Details" : "संपर्क माहिती"}
+            {t("email") === "Email" ? "Official Contact Details" : "कार्यालयीन संपर्क तपशील"}
           </h4>
-          <div className="space-y-3 text-green-200 text-xs">
-            <div className="flex items-center gap-3">
-              <Mail size={14} className="text-amber-400 shrink-0" />
+          
+          <div className="space-y-3.5 text-green-100 text-sm leading-relaxed">
+            <div className="flex items-center gap-3.5 group">
+              <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-amber-400 group-hover:bg-white/10 group-hover:border-amber-500 transition-all duration-300 shrink-0">
+                <Mail size={14} />
+              </div>
               <div>
-                <span className="font-semibold text-green-300/90 mr-1.5">{t("email")}:</span>
-                <a href="mailto:dhamner189585@gmail.com" className="hover:text-white transition-colors font-medium">dhamner189585@gmail.com</a>
+                <span className="font-semibold text-green-300 mr-2 text-xs uppercase tracking-wider">{t("email")}:</span>
+                <a 
+                  href="mailto:dhamner189585@gmail.com" 
+                  className="hover:text-white hover:underline transition-colors duration-200 font-medium text-white"
+                >
+                  dhamner189585@gmail.com
+                </a>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              <Clock size={14} className="text-amber-400 shrink-0" />
+
+            <div className="flex items-center gap-3.5 group">
+              <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-amber-400 group-hover:bg-white/10 group-hover:border-amber-500 transition-all duration-300 shrink-0">
+                <Clock size={14} />
+              </div>
               <div>
-                <span className="font-semibold text-green-300/90 mr-1.5">{t("officeHours")}:</span>
-                <span className="font-medium">{t("officeHoursVal")}</span>
+                <span className="font-semibold text-green-300 mr-2 text-xs uppercase tracking-wider">{t("officeHours")}:</span>
+                <span className="font-medium text-white">{t("officeHoursVal")}</span>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              <Phone size={14} className="text-amber-400 shrink-0" />
+
+            <div className="flex items-center gap-3.5 group">
+              <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-amber-400 group-hover:bg-white/10 group-hover:border-amber-500 transition-all duration-300 shrink-0">
+                <Phone size={14} />
+              </div>
               <div>
-                <span className="font-semibold text-green-300/90 mr-1.5">{t("phone")}:</span>
-                <a href="tel:+919850032987" className="hover:text-white transition-colors font-medium">+91 9850032987</a>
+                <span className="font-semibold text-green-300 mr-2 text-xs uppercase tracking-wider">{t("phone")}:</span>
+                <a 
+                  href="tel:+919850032987" 
+                  className="hover:text-white hover:underline transition-colors duration-200 font-medium text-white"
+                >
+                  +91 9850032987
+                </a>
               </div>
             </div>
           </div>
         </div>
+
       </div>
     </footer>
   );
