@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { runWithFallback, mockDb } from '@/lib/dbFallback'
 
 /**
  * GET /api/transactions
@@ -39,28 +40,58 @@ export async function GET(request: NextRequest) {
       where.status = status.toUpperCase()
     }
 
-    const [transactions, total] = await Promise.all([
-      prisma.transaction.findMany({
-        where,
-        orderBy: { paymentDate: 'desc' },
-        skip,
-        take: limit,
-        include: {
-          property: {
-            select: {
-              ownerName: true,
-              ownerNameEn: true,
-              wardNo: true,
+    const [transactions, total] = await runWithFallback(
+      () => Promise.all([
+        prisma.transaction.findMany({
+          where,
+          orderBy: { paymentDate: 'desc' },
+          skip,
+          take: limit,
+          include: {
+            property: {
+              select: {
+                ownerName: true,
+                ownerNameEn: true,
+                wardNo: true,
+              },
             },
           },
-        },
-      }),
-      prisma.transaction.count({ where }),
-    ])
+        }),
+        prisma.transaction.count({ where }),
+      ]),
+      () => {
+        let list = mockDb.transactions;
+        if (propertyNo) {
+          list = list.filter(t => t.propertyNo.toUpperCase() === propertyNo.toUpperCase());
+        }
+        if (year) {
+          list = list.filter(t => t.financialYear === year);
+        }
+        if (status) {
+          list = list.filter(t => t.status === status.toUpperCase());
+        }
+        list.sort((a, b) => b.paymentDate.getTime() - a.paymentDate.getTime());
+        
+        const total = list.length;
+        const pageList = list.slice(skip, skip + limit).map(t => {
+          const prop = mockDb.properties.find(p => p.propertyNo === t.propertyNo);
+          return {
+            ...t,
+            property: {
+              ownerName: prop?.ownerName || '',
+              ownerNameEn: prop?.ownerNameEn || '',
+              wardNo: prop?.wardNo || 1
+            }
+          };
+        });
+        
+        return [pageList, total] as any;
+      }
+    )
 
     return NextResponse.json({
       success: true,
-      data: transactions.map((t) => ({
+      data: transactions.map((t: any) => ({
         ...t,
         amountPaid: Number(t.amountPaid),
       })),
@@ -99,7 +130,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
 
-    const { propertyNo, amountPaid, taxType, paymentMethod, recordedBy, notes, gatewayRef } = body
+    const { propertyNo, amountPaid, taxType, paymentMethod, recordedBy, notes, gatewayRef, financialYear } = body
 
     // Validate required fields
     if (!propertyNo || !amountPaid || !taxType || !paymentMethod) {
@@ -113,7 +144,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate tax type
-    const validTaxTypes = ['house_tax', 'water_tax', 'sanitary_tax', 'light_tax']
+    const validTaxTypes = ['house_tax', 'water_tax']
     if (!validTaxTypes.includes(taxType)) {
       return NextResponse.json(
         { success: false, message: `अवैध कर प्रकार. वैध प्रकार: ${validTaxTypes.join(', ')}` },
@@ -130,26 +161,56 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Verify property exists
-    const property = await prisma.property.findUnique({
-      where: { propertyNo: propertyNo.toUpperCase() },
-    })
+    // Determine target financial year (April to March)
+    const now = new Date()
+    const month = now.getMonth() // 0-indexed
+    const currentFy =
+      month >= 3 // April onwards
+        ? `${now.getFullYear()}-${String(now.getFullYear() + 1).slice(2)}`
+        : `${now.getFullYear() - 1}-${String(now.getFullYear()).slice(2)}`
+    const targetFy = financialYear || currentFy
+
+    // Verify property exists for the target financial year
+    const property = await runWithFallback(
+      () => prisma.property.findUnique({
+        where: {
+          propertyNo_financialYear: {
+            propertyNo: propertyNo.toUpperCase(),
+            financialYear: targetFy,
+          },
+        },
+      }),
+      () => {
+        return mockDb.properties.find(
+          (p) =>
+            p.propertyNo.toUpperCase() === propertyNo.toUpperCase() &&
+            p.financialYear === targetFy
+        ) as any;
+      }
+    )
 
     if (!property) {
       return NextResponse.json(
-        { success: false, message: `मालमत्ता क्रमांक '${propertyNo}' सापडला नाही.` },
+        { success: false, message: `मालमत्ता क्रमांक '${propertyNo}' आणि आर्थिक वर्ष '${targetFy}' साठी रेकॉर्ड सापडला नाही.` },
         { status: 404 }
       )
     }
 
     // Generate transaction ID: TXN-YYYY-XXXXX
     const year = new Date().getFullYear()
-    const lastTransaction = await prisma.transaction.findFirst({
-      where: {
-        transactionId: { startsWith: `TXN-${year}` },
-      },
-      orderBy: { transactionId: 'desc' },
-    })
+    const lastTransaction = await runWithFallback(
+      () => prisma.transaction.findFirst({
+        where: {
+          transactionId: { startsWith: `TXN-${year}` },
+        },
+        orderBy: { transactionId: 'desc' },
+      }),
+      () => {
+        const list = mockDb.transactions.filter(t => t.transactionId.startsWith(`TXN-${year}`));
+        list.sort((a, b) => b.transactionId.localeCompare(a.transactionId));
+        return list[0] as any;
+      }
+    )
 
     let nextSeq = 1
     if (lastTransaction) {
@@ -158,55 +219,67 @@ export async function POST(request: NextRequest) {
     }
     const transactionId = `TXN-${year}-${String(nextSeq).padStart(5, '0')}`
 
-    // Determine financial year (April to March)
-    const now = new Date()
-    const month = now.getMonth() // 0-indexed
-    const fy =
-      month >= 3 // April onwards
-        ? `${now.getFullYear()}-${String(now.getFullYear() + 1).slice(2)}`
-        : `${now.getFullYear() - 1}-${String(now.getFullYear()).slice(2)}`
-
-    // Map tax type to property due field
-    const taxDueFieldMap: Record<string, string> = {
-      house_tax: 'houseTaxDue',
-      water_tax: 'waterTaxDue',
-      sanitary_tax: 'sanitaryTaxDue',
-      light_tax: 'lightTaxDue',
+    // Map tax type to property due/paid fields
+    const taxFieldsMap: Record<string, { due: string; paid: string }> = {
+      house_tax: { due: 'houseTaxDue', paid: 'houseTaxPaid' },
+      water_tax: { due: 'waterTaxDue', paid: 'waterTaxPaid' },
     }
 
-    const dueField = taxDueFieldMap[taxType]
+    const { due: dueField, paid: paidField } = taxFieldsMap[taxType]
 
     // Create transaction and update property dues in a single transaction
-    const result = await prisma.$transaction(async (tx) => {
-      // Create the transaction record
-      const transaction = await tx.transaction.create({
-        data: {
-          transactionId,
+    const result = await runWithFallback(
+      () => prisma.$transaction(async (tx) => {
+        // Create the transaction record
+        const transaction = await tx.transaction.create({
+          data: {
+            transactionId,
+            propertyNo: propertyNo.toUpperCase(),
+            amountPaid: parseFloat(amountPaid),
+            taxType,
+            paymentMethod: paymentMethod.toUpperCase(),
+            financialYear: targetFy,
+            status: 'SUCCESS',
+            gatewayRef: gatewayRef || null,
+            recordedBy: recordedBy || null,
+            notes: notes || null,
+          },
+        })
+
+        // Update the property record for the specific financial year
+        const pay = parseFloat(amountPaid)
+        const currentDue = Number(property[dueField as keyof typeof property] || 0)
+        const currentPaid = Number(property[paidField as keyof typeof property] || 0)
+
+        await tx.property.update({
+          where: {
+            propertyNo_financialYear: {
+              propertyNo: propertyNo.toUpperCase(),
+              financialYear: targetFy,
+            },
+          },
+          data: {
+            [dueField]: Math.max(0, currentDue - pay),
+            [paidField]: currentPaid + pay,
+          },
+        })
+
+        return transaction
+      }),
+      () => {
+        const res = mockDb.recordTransaction({
           propertyNo: propertyNo.toUpperCase(),
           amountPaid: parseFloat(amountPaid),
           taxType,
           paymentMethod: paymentMethod.toUpperCase(),
-          financialYear: fy,
-          status: 'SUCCESS',
-          gatewayRef: gatewayRef || null,
           recordedBy: recordedBy || null,
           notes: notes || null,
-        },
-      })
-
-      // Update the property dues (reduce by the amount paid)
-      const currentDue = Number(property[dueField as keyof typeof property] || 0)
-      const newDue = Math.max(0, currentDue - parseFloat(amountPaid))
-
-      await tx.property.update({
-        where: { propertyNo: propertyNo.toUpperCase() },
-        data: {
-          [dueField]: newDue,
-        },
-      })
-
-      return transaction
-    })
+          financialYear: targetFy,
+        });
+        if (!res.success) throw new Error(res.message);
+        return res.data as any;
+      }
+    )
 
     return NextResponse.json({
       success: true,

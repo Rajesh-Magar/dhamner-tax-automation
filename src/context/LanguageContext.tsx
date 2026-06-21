@@ -23,7 +23,7 @@ const translations: Record<Language, Record<string, string>> = {
     login: "प्रशासक लॉगिन (Login)",
     mainSite: "मुख्य संकेतस्थळ ↗",
     searchTitle: "आपला घरपट्टी व पाणीपट्टी कर शोधा",
-    searchPlaceholder: "उदा. GP-001 किंवा रामचंद्र पाटील...",
+    searchPlaceholder: "उदा. GP-001, रामचंद्र पाटील किंवा 9823xxxxxx...",
     searchBtn: "शोधा (Search)",
     allWards: "सर्व प्रभाग (All Wards)",
     ward1: "प्रभाग १ (Ward 1)",
@@ -34,9 +34,9 @@ const translations: Record<Language, Record<string, string>> = {
     officeHoursVal: "सकाळी ९.१५ ते सायंकाळी ६.१५",
     phone: "दूरध्वनी",
     citizenPortal: "नागरिक सेवा केंद्र • Citizen Portal",
-    searchSubtitle: "मालमत्ता क्रमांक (Property No) किंवा धारकाच्या नावाने कर शोधा आणि थेट ऑनलाइन भरणा करा.",
+    searchSubtitle: "मालमत्ता क्रमांक (Property No), धारकाच्या नावाने किंवा मोबाईल क्रमांकाने कर शोधा आणि थेट ऑनलाइन भरणा करा.",
     searchHelper: "💡 मालमत्ता क्रमांक (उदा. GP-001) प्रविष्ट करा",
-    searchHelperName: "मराठी किंवा इंग्रजी नावाने शोधा",
+    searchHelperName: "नावाने किंवा मोबाईल क्रमांकाने शोधा",
     developedFor: "यशवंत ग्रामपंचायत धामणेर, ता. कोरेगाव, जि. सातारा",
     rightsReserved: "सर्व हक्क राखीव.",
     // Dashboard strings
@@ -60,8 +60,6 @@ const translations: Record<Language, Record<string, string>> = {
     amount: "रक्कम",
     houseTax: "घरपट्टी (House Tax)",
     waterTax: "पाणीपट्टी (Water Tax)",
-    sanitaryTax: "सॅनिटरी कर (Sanitary Tax)",
-    lightTax: "दिवाबत्ती कर (Street Light Tax)",
     payBtn: "भरणा करा (Pay)"
   },
   en: {
@@ -74,7 +72,7 @@ const translations: Record<Language, Record<string, string>> = {
     login: "Admin Login",
     mainSite: "Main Website ↗",
     searchTitle: "Search Your Property & Water Tax",
-    searchPlaceholder: "e.g. GP-001 or Ramchandra Patil...",
+    searchPlaceholder: "e.g. GP-001, Ramchandra Patil or 9823xxxxxx...",
     searchBtn: "Search",
     allWards: "All Wards",
     ward1: "Ward 1",
@@ -85,9 +83,9 @@ const translations: Record<Language, Record<string, string>> = {
     officeHoursVal: "9:15 AM to 6:15 PM",
     phone: "Phone",
     citizenPortal: "Citizen Service Center • Tax Portal",
-    searchSubtitle: "Search by Property Number or Owner Name to make an online payment.",
+    searchSubtitle: "Search by Property Number, Owner Name, or Mobile Number to make an online payment.",
     searchHelper: "💡 Enter Property Number (e.g., GP-001)",
-    searchHelperName: "Search by name in English or Marathi",
+    searchHelperName: "Search by name or mobile number",
     developedFor: "Yeshwant Grampanchayat Dhamner, Tal. Koregaon, Dist. Satara",
     rightsReserved: "All Rights Reserved.",
     // Dashboard strings
@@ -111,8 +109,6 @@ const translations: Record<Language, Record<string, string>> = {
     amount: "Amount",
     houseTax: "House Tax",
     waterTax: "Water Tax",
-    sanitaryTax: "Sanitary Tax",
-    lightTax: "Street Light Tax",
     payBtn: "Pay Now"
   }
 };

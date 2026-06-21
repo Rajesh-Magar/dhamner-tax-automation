@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
@@ -17,14 +17,13 @@ interface Property {
   address: string | null;
   houseTaxDue: number;
   waterTaxDue: number;
-  sanitaryTaxDue: number;
-  lightTaxDue: number;
   totalDue: number;
 }
 
 export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [wardFilter, setWardFilter] = useState("all");
+  const [selectedFy, setSelectedFy] = useState("2025-26");
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
@@ -38,12 +37,22 @@ export default function HomePage() {
   const [totalProperties, setTotalProperties] = useState(0);
 
   const { lang, t } = useLanguage();
+  const resultsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (hasSearched && !loading && resultsRef.current) {
+      const timer = setTimeout(() => {
+        resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [properties, hasSearched, loading]);
 
   useEffect(() => {
     // Fetch stats for homepage display
     const fetchStats = async () => {
       try {
-        const res = await fetch("/api/admin/stats");
+        const res = await fetch(`/api/admin/stats?year=${selectedFy}`);
         const data = await res.json();
         if (data.success) {
           setTotalCollected(data.data.overview.totalCollected);
@@ -54,7 +63,7 @@ export default function HomePage() {
       }
     };
     fetchStats();
-  }, []);
+  }, [selectedFy]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,11 +73,7 @@ export default function HomePage() {
     setHasSearched(true);
 
     try {
-      let url = `/api/properties?search=${encodeURIComponent(searchQuery.trim())}`;
-      if (wardFilter !== "all") {
-        url += `&ward=${wardFilter}`;
-      }
-
+      const url = `/api/properties?search=${encodeURIComponent(searchQuery.trim())}`;
       const res = await fetch(url);
       const data = await res.json();
 
@@ -91,7 +96,7 @@ export default function HomePage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50/50">
+    <div className="min-h-screen flex flex-col bg-slate-50">
       <Navbar />
 
       <main className="flex-1">
@@ -122,22 +127,8 @@ export default function HomePage() {
               onSubmit={handleSearch}
               className="bg-white/10 backdrop-blur-md p-2 rounded-2xl border border-white/10 max-w-2xl mx-auto shadow-2xl flex flex-col sm:flex-row gap-2"
             >
-              {/* Ward filter */}
-              <div className="w-full sm:w-1/3">
-                <select
-                  value={wardFilter}
-                  onChange={(e) => setWardFilter(e.target.value)}
-                  className="w-full h-12 px-3 bg-slate-800 text-white border-0 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-orange-500 focus:outline-none cursor-pointer"
-                >
-                  <option value="all">{t("allWards")}</option>
-                  <option value="1">{t("ward1")}</option>
-                  <option value="2">{t("ward2")}</option>
-                  <option value="3">{t("ward3")}</option>
-                </select>
-              </div>
-
               {/* Text input */}
-              <div className="w-full sm:w-2/3 relative">
+              <div className="w-full sm:flex-1 relative">
                 <input
                   type="text"
                   placeholder={t("searchPlaceholder")}
@@ -153,7 +144,7 @@ export default function HomePage() {
               {/* Submit */}
               <button
                 type="submit"
-                className="w-full sm:w-1/4 h-12 bg-gradient-to-r from-orange-600 to-amber-500 hover:from-orange-50 hover:to-amber-400 text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98] shadow-lg shadow-orange-600/20 cursor-pointer"
+                className="w-full sm:w-[25%] h-12 bg-gradient-to-r from-orange-600 to-amber-500 hover:from-orange-50 hover:to-amber-400 text-white font-bold rounded-xl text-sm transition-all active:scale-[0.98] shadow-lg shadow-orange-600/20 cursor-pointer"
               >
                 {t("searchBtn")}
               </button>
@@ -169,7 +160,7 @@ export default function HomePage() {
         </section>
 
         {/* Results / Landing Content */}
-        <section className="max-w-4xl mx-auto px-4 py-12">
+        <section ref={resultsRef} className="max-w-4xl mx-auto px-4 py-12 scroll-mt-24">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <svg

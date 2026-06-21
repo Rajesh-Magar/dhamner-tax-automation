@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { runWithFallback, mockDb } from '@/lib/dbFallback'
 
 /**
  * GET /api/admin/stats
@@ -17,194 +18,180 @@ export async function GET(request: NextRequest) {
     const ward = searchParams.get('ward')
     const year = searchParams.get('year') || getCurrentFinancialYear()
 
-    // Build property filter
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const propertyWhere: any = { isActive: true }
-    if (ward && ward !== 'all' && ['1', '2', '3'].includes(ward)) {
-      propertyWhere.wardNo = parseInt(ward, 10)
-    }
-
-    // ---- Property & Tax Summary ----
-    const properties = await prisma.property.findMany({
-      where: propertyWhere,
-      select: {
-        propertyNo: true,
-        ownerName: true,
-        ownerNameEn: true,
-        wardNo: true,
-        mobileNumber: true,
-        houseTaxDue: true,
-        waterTaxDue: true,
-        sanitaryTaxDue: true,
-        lightTaxDue: true,
-      },
-    })
-
-    // Calculate totals
-    let totalHouseTaxDue = 0
-    let totalWaterTaxDue = 0
-    let totalSanitaryTaxDue = 0
-    let totalLightTaxDue = 0
-    let defaulterCount = 0
-    const defaulters: Array<{
-      propertyNo: string
-      ownerName: string
-      ownerNameEn: string | null
-      wardNo: number
-      mobileNumber: string
-      totalDue: number
-    }> = []
-
-    for (const p of properties) {
-      const houseTax = Number(p.houseTaxDue)
-      const waterTax = Number(p.waterTaxDue)
-      const sanitaryTax = Number(p.sanitaryTaxDue)
-      const lightTax = Number(p.lightTaxDue)
-      const totalDue = houseTax + waterTax + sanitaryTax + lightTax
-
-      totalHouseTaxDue += houseTax
-      totalWaterTaxDue += waterTax
-      totalSanitaryTaxDue += sanitaryTax
-      totalLightTaxDue += lightTax
-
-      if (totalDue > 0) {
-        defaulterCount++
-        defaulters.push({
-          propertyNo: p.propertyNo,
-          ownerName: p.ownerName,
-          ownerNameEn: p.ownerNameEn,
-          wardNo: p.wardNo,
-          mobileNumber: p.mobileNumber,
-          totalDue,
-        })
-      }
-    }
-
-    // Sort defaulters by highest dues
-    defaulters.sort((a, b) => b.totalDue - a.totalDue)
-
-    // ---- Transaction Summary (collections for the year) ----
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const txnWhere: any = {
-      financialYear: year,
-      status: 'SUCCESS',
-    }
-
-    // If ward filter, need to join through property
-    if (ward && ward !== 'all' && ['1', '2', '3'].includes(ward)) {
-      txnWhere.property = { wardNo: parseInt(ward, 10) }
-    }
-
-    const transactions = await prisma.transaction.findMany({
-      where: txnWhere,
-      select: {
-        amountPaid: true,
-        taxType: true,
-        paymentMethod: true,
-      },
-    })
-
-    let totalCollected = 0
-    let houseTaxCollected = 0
-    let waterTaxCollected = 0
-    let sanitaryTaxCollected = 0
-    let lightTaxCollected = 0
-    let onlinePayments = 0
-    let cashPayments = 0
-    let upiPayments = 0
-
-    for (const t of transactions) {
-      const amount = Number(t.amountPaid)
-      totalCollected += amount
-
-      switch (t.taxType) {
-        case 'house_tax':
-          houseTaxCollected += amount
-          break
-        case 'water_tax':
-          waterTaxCollected += amount
-          break
-        case 'sanitary_tax':
-          sanitaryTaxCollected += amount
-          break
-        case 'light_tax':
-          lightTaxCollected += amount
-          break
+    const prismaQuery = async () => {
+      // Build property filter
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const propertyWhere: any = { isActive: true, financialYear: year }
+      if (ward && ward !== 'all' && ['1', '2', '3'].includes(ward)) {
+        propertyWhere.wardNo = parseInt(ward, 10)
       }
 
-      switch (t.paymentMethod) {
-        case 'ONLINE':
-          onlinePayments++
-          break
-        case 'CASH':
-          cashPayments++
-          break
-        case 'UPI':
-          upiPayments++
-          break
+      // ---- Property & Tax Summary ----
+      const properties = await prisma.property.findMany({
+        where: propertyWhere,
+        select: {
+          propertyNo: true,
+          ownerName: true,
+          ownerNameEn: true,
+          wardNo: true,
+          mobileNumber: true,
+          houseTaxDue: true,
+          waterTaxDue: true,
+        },
+      })
+
+      // Calculate totals
+      let totalHouseTaxDue = 0
+      let totalWaterTaxDue = 0
+      let defaulterCount = 0
+      const defaulters: Array<{
+        propertyNo: string
+        ownerName: string
+        ownerNameEn: string | null
+        wardNo: number
+        mobileNumber: string
+        totalDue: number
+      }> = []
+
+      for (const p of properties) {
+        const houseTax = Number(p.houseTaxDue)
+        const waterTax = Number(p.waterTaxDue)
+        const totalDue = houseTax + waterTax
+
+        totalHouseTaxDue += houseTax
+        totalWaterTaxDue += waterTax
+
+        if (totalDue > 0) {
+          defaulterCount++
+          defaulters.push({
+            propertyNo: p.propertyNo,
+            ownerName: p.ownerName,
+            ownerNameEn: p.ownerNameEn,
+            wardNo: p.wardNo,
+            mobileNumber: p.mobileNumber,
+            totalDue,
+          })
+        }
       }
-    }
 
-    // ---- Ward-wise Breakdown ----
-    const wardStats = await getWardWiseStats()
+      // Sort defaulters by highest dues
+      defaulters.sort((a, b) => b.totalDue - a.totalDue)
 
-    // ---- Total Expected (dues + already collected) ----
-    const totalExpected =
-      totalHouseTaxDue +
-      totalWaterTaxDue +
-      totalSanitaryTaxDue +
-      totalLightTaxDue +
-      totalCollected
-
-    return NextResponse.json({
-      success: true,
-      data: {
+      // ---- Transaction Summary (collections for the year) ----
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const txnWhere: any = {
         financialYear: year,
-        overview: {
-          totalProperties: properties.length,
-          totalExpected: Math.round(totalExpected * 100) / 100,
-          totalCollected: Math.round(totalCollected * 100) / 100,
-          totalPending:
-            Math.round(
-              (totalHouseTaxDue + totalWaterTaxDue + totalSanitaryTaxDue + totalLightTaxDue) * 100
-            ) / 100,
-          collectionPercentage:
-            totalExpected > 0
-              ? Math.round((totalCollected / totalExpected) * 10000) / 100
-              : 0,
+        status: 'SUCCESS',
+      }
+
+      // If ward filter, need to join through property
+      if (ward && ward !== 'all' && ['1', '2', '3'].includes(ward)) {
+        txnWhere.property = { wardNo: parseInt(ward, 10), financialYear: year }
+      }
+
+      const transactions = await prisma.transaction.findMany({
+        where: txnWhere,
+        select: {
+          amountPaid: true,
+          taxType: true,
+          paymentMethod: true,
         },
-        taxBreakdown: {
-          houseTax: {
-            collected: Math.round(houseTaxCollected * 100) / 100,
-            pending: Math.round(totalHouseTaxDue * 100) / 100,
+      })
+
+      let totalCollected = 0
+      let houseTaxCollected = 0
+      let waterTaxCollected = 0
+      let onlinePayments = 0
+      let cashPayments = 0
+      let upiPayments = 0
+
+      for (const t of transactions) {
+        const amount = Number(t.amountPaid)
+        totalCollected += amount
+
+        switch (t.taxType) {
+          case 'house_tax':
+            houseTaxCollected += amount
+            break
+          case 'water_tax':
+            waterTaxCollected += amount
+            break
+        }
+
+        switch (t.paymentMethod) {
+          case 'ONLINE':
+            onlinePayments++
+            break
+          case 'CASH':
+            cashPayments++
+            break
+          case 'UPI':
+            upiPayments++
+            break
+        }
+      }
+
+      // ---- Ward-wise Breakdown ----
+      const wardStats = await getWardWiseStats(year)
+
+      // ---- Total Expected (dues + already collected) ----
+      const totalExpected =
+        totalHouseTaxDue +
+        totalWaterTaxDue +
+        totalCollected
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          financialYear: year,
+          overview: {
+            totalProperties: properties.length,
+            totalExpected: Math.round(totalExpected * 100) / 100,
+            totalCollected: Math.round(totalCollected * 100) / 100,
+            totalPending:
+              Math.round(
+                (totalHouseTaxDue + totalWaterTaxDue) * 100
+              ) / 100,
+            collectionPercentage:
+              totalExpected > 0
+                ? Math.round((totalCollected / totalExpected) * 10000) / 100
+                : 0,
           },
-          waterTax: {
-            collected: Math.round(waterTaxCollected * 100) / 100,
-            pending: Math.round(totalWaterTaxDue * 100) / 100,
+          taxBreakdown: {
+            houseTax: {
+              collected: Math.round(houseTaxCollected * 100) / 100,
+              pending: Math.round(totalHouseTaxDue * 100) / 100,
+            },
+            waterTax: {
+              collected: Math.round(waterTaxCollected * 100) / 100,
+              pending: Math.round(totalWaterTaxDue * 100) / 100,
+            },
           },
-          sanitaryTax: {
-            collected: Math.round(sanitaryTaxCollected * 100) / 100,
-            pending: Math.round(totalSanitaryTaxDue * 100) / 100,
+          paymentMethods: {
+            online: onlinePayments,
+            cash: cashPayments,
+            upi: upiPayments,
+            totalTransactions: transactions.length,
           },
-          lightTax: {
-            collected: Math.round(lightTaxCollected * 100) / 100,
-            pending: Math.round(totalLightTaxDue * 100) / 100,
+          defaulters: {
+            count: defaulterCount,
+            paidUpCount: properties.length - defaulterCount,
+            list: defaulters.slice(0, 50),
           },
+          wardStats,
         },
-        paymentMethods: {
-          online: onlinePayments,
-          cash: cashPayments,
-          upi: upiPayments,
-          totalTransactions: transactions.length,
-        },
-        defaulters: {
-          count: defaulterCount,
-          paidUpCount: properties.length - defaulterCount,
-          list: defaulters.slice(0, 50), // Top 50 defaulters
-        },
-        wardStats,
-      },
-    })
+      })
+    }
+
+    const fallbackQuery = () => {
+      const stats = mockDb.getAdminStats(ward || undefined, year)
+      return NextResponse.json({
+        success: true,
+        data: stats,
+      })
+    }
+
+    return await runWithFallback(prismaQuery, fallbackQuery)
   } catch (error) {
     console.error('Error fetching admin stats:', error)
     return NextResponse.json(
@@ -217,18 +204,16 @@ export async function GET(request: NextRequest) {
 /**
  * Get ward-wise statistics for all 3 wards
  */
-async function getWardWiseStats() {
+async function getWardWiseStats(year: string) {
   const wards = [1, 2, 3]
   const stats = []
 
   for (const wardNo of wards) {
     const properties = await prisma.property.findMany({
-      where: { wardNo, isActive: true },
+      where: { wardNo, isActive: true, financialYear: year },
       select: {
         houseTaxDue: true,
         waterTaxDue: true,
-        sanitaryTaxDue: true,
-        lightTaxDue: true,
       },
     })
 
@@ -238,18 +223,16 @@ async function getWardWiseStats() {
     for (const p of properties) {
       const due =
         Number(p.houseTaxDue) +
-        Number(p.waterTaxDue) +
-        Number(p.sanitaryTaxDue) +
-        Number(p.lightTaxDue)
+        Number(p.waterTaxDue)
       totalDue += due
       if (due > 0) propertiesWithDues++
     }
 
     const transactions = await prisma.transaction.findMany({
       where: {
-        property: { wardNo },
+        property: { wardNo, financialYear: year },
         status: 'SUCCESS',
-        financialYear: getCurrentFinancialYear(),
+        financialYear: year,
       },
       select: { amountPaid: true },
     })

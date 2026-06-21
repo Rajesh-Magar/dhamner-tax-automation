@@ -7,23 +7,27 @@ datasource db {
 }
 
 model Property {
-  id              Int           @id @default(autoincrement())
-  propertyNo      String        @unique @map("property_no")
-  ownerName       String        @map("owner_name")
-  ownerNameEn     String?       @map("owner_name_en")
-  mobileNumber    String        @map("mobile_number")
-  wardNo          Int           @map("ward_no")
-  address         String?
-  houseTaxDue     Decimal       @default(0) @map("house_tax_due") @db.Decimal(10, 2)
-  waterTaxDue     Decimal       @default(0) @map("water_tax_due") @db.Decimal(10, 2)
-  sanitaryTaxDue  Decimal       @default(0) @map("sanitary_tax_due") @db.Decimal(10, 2)
-  lightTaxDue     Decimal       @default(0) @map("light_tax_due") @db.Decimal(10, 2)
-  isActive        Boolean       @default(true) @map("is_active")
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
+  id                Int           @id @default(autoincrement())
+  propertyNo        String        @map("property_no")
+  financialYear     String        @map("financial_year")
+  ownerName         String        @map("owner_name")
+  ownerNameEn       String?       @map("owner_name_en")
+  mobileNumber      String        @map("mobile_number")
+  wardNo            Int           @map("ward_no")
+  address           String?
+  houseTaxAssessed  Decimal       @default(0) @map("house_tax_assessed") @db.Decimal(10, 2)
+  waterTaxAssessed  Decimal       @default(0) @map("water_tax_assessed") @db.Decimal(10, 2)
+  houseTaxPaid      Decimal       @default(0) @map("house_tax_paid") @db.Decimal(10, 2)
+  waterTaxPaid      Decimal       @default(0) @map("water_tax_paid") @db.Decimal(10, 2)
+  houseTaxDue       Decimal       @default(0) @map("house_tax_due") @db.Decimal(10, 2)
+  waterTaxDue       Decimal       @default(0) @map("water_tax_due") @db.Decimal(10, 2)
+  isActive          Boolean       @default(true) @map("is_active")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
 
-  transactions    Transaction[]
+  transactions      Transaction[]
 
+  @@unique([propertyNo, financialYear])
   @@map("properties")
 }
 
@@ -43,7 +47,7 @@ model Transaction {
   notes           String?
   createdAt       DateTime  @default(now()) @map("created_at")
 
-  property        Property  @relation(fields: [propertyNo], references: [propertyNo])
+  property        Property  @relation(fields: [propertyNo, financialYear], references: [propertyNo, financialYear])
 
   @@map("transactions")
 }

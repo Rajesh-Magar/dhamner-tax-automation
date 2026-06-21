@@ -10,13 +10,12 @@ interface PaymentModalProps {
   ownerName: string;
   taxType: string;
   amount: number;
+  financialYear?: string;
 }
 
 const taxNames: Record<string, string> = {
   house_tax: "घरपट्टी (House Tax)",
   water_tax: "पाणीपट्टी (Water Tax)",
-  sanitary_tax: "सॅनिटरी कर (Sanitary Tax)",
-  light_tax: "दिवाबत्ती कर (Street Light Tax)",
 };
 
 export default function PaymentModal({
@@ -27,6 +26,7 @@ export default function PaymentModal({
   ownerName,
   taxType,
   amount,
+  financialYear,
 }: PaymentModalProps) {
   const [method, setMethod] = useState<"UPI" | "CARD" | "NETBANKING">("UPI");
   const [status, setStatus] = useState<"IDLE" | "PROCESSING" | "SUCCESS" | "ERROR">("IDLE");
@@ -67,6 +67,7 @@ export default function PaymentModal({
         paymentMethod: method,
         gatewayRef: method === "UPI" ? `UPI_REF_${Math.random().toString(36).substring(2, 10).toUpperCase()}` : `RZP_REF_${Math.random().toString(36).substring(2, 12).toUpperCase()}`,
         notes: `${taxNames[taxType]} ऑनलाइन भरणा`,
+        financialYear,
       };
 
       // Call API

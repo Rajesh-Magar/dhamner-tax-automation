@@ -25,6 +25,20 @@ interface Transaction {
   notes: string | null;
 }
 
+interface PropertyYearDues {
+  id: number;
+  propertyNo: string;
+  financialYear: string;
+  houseTaxAssessed: number;
+  waterTaxAssessed: number;
+  houseTaxPaid: number;
+  waterTaxPaid: number;
+  houseTaxDue: number;
+  waterTaxDue: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface PropertyDetails {
   propertyNo: string;
   ownerName: string;
@@ -34,25 +48,21 @@ interface PropertyDetails {
   address: string | null;
   houseTaxDue: number;
   waterTaxDue: number;
-  sanitaryTaxDue: number;
-  lightTaxDue: number;
+  financialYear: string;
   totalDue: number;
   totalPaid: number;
   transactions: Transaction[];
+  yearDues: PropertyYearDues[];
 }
 
 const taxDisplayNames: Record<string, Record<string, string>> = {
   mr: {
     house_tax: "घरपट्टी",
     water_tax: "पाणीपट्टी",
-    sanitary_tax: "सॅनिटरी कर",
-    light_tax: "दिवाबत्ती कर",
   },
   en: {
     house_tax: "House Tax",
     water_tax: "Water Tax",
-    sanitary_tax: "Sanitary Tax",
-    light_tax: "Street Light Tax",
   }
 };
 
@@ -69,6 +79,7 @@ export default function CitizenDashboard({ params }: { params: Promise<{ propert
   // Payment triggers
   const [selectedTax, setSelectedTax] = useState<string | null>(null);
   const [paymentAmount, setPaymentAmount] = useState(0);
+  const [paymentFy, setPaymentFy] = useState<string | undefined>(undefined);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
 
   // Receipt view triggers
@@ -100,9 +111,10 @@ export default function CitizenDashboard({ params }: { params: Promise<{ propert
     fetchPropertyData();
   }, [propertyNo]);
 
-  const handlePayClick = (taxType: string, amount: number) => {
+  const handlePayClick = (taxType: string, amount: number, fy?: string) => {
     setSelectedTax(taxType);
     setPaymentAmount(amount);
+    setPaymentFy(fy || property?.financialYear);
     setIsPaymentOpen(true);
   };
 
@@ -115,7 +127,7 @@ export default function CitizenDashboard({ params }: { params: Promise<{ propert
 
   if (loading) {
     return (
-      <div className="min-h-screen flex flex-col bg-slate-50/50">
+      <div className="min-h-screen flex flex-col bg-slate-50">
         <Navbar />
         <div className="flex-1 flex flex-col items-center justify-center py-20">
           <svg className="animate-spin h-10 w-10 text-orange-600 mb-3" fill="none" viewBox="0 0 24 24">
@@ -133,7 +145,7 @@ export default function CitizenDashboard({ params }: { params: Promise<{ propert
 
   if (error || !property) {
     return (
-      <div className="min-h-screen flex flex-col bg-slate-50/50">
+      <div className="min-h-screen flex flex-col bg-slate-50">
         <Navbar />
         <div className="flex-1 max-w-md mx-auto flex flex-col items-center justify-center p-6 text-center">
           <span className="text-4xl mb-4">⚠️</span>
@@ -153,7 +165,7 @@ export default function CitizenDashboard({ params }: { params: Promise<{ propert
   const isDuesCleared = property.totalDue === 0;
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50/50">
+    <div className="min-h-screen flex flex-col bg-slate-50">
       <Navbar />
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-8">
@@ -254,18 +266,6 @@ export default function CitizenDashboard({ params }: { params: Promise<{ propert
               amount={property.waterTaxDue}
               onPay={() => handlePayClick("water_tax", property.waterTaxDue)}
             />
-            {/* Sanitary Tax Card */}
-            <TaxCard
-              title={t("sanitaryTax")}
-              amount={property.sanitaryTaxDue}
-              onPay={() => handlePayClick("sanitary_tax", property.sanitaryTaxDue)}
-            />
-            {/* Light Tax Card */}
-            <TaxCard
-              title={t("lightTax")}
-              amount={property.lightTaxDue}
-              onPay={() => handlePayClick("light_tax", property.lightTaxDue)}
-            />
           </div>
 
           {/* Transactions History Tab */}
@@ -337,6 +337,82 @@ export default function CitizenDashboard({ params }: { params: Promise<{ propert
             </div>
           </div>
         </div>
+
+        {/* Yearly Dues History Breakdown */}
+        {property.yearDues && property.yearDues.length > 0 && (
+          <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm mb-8">
+            <h3 className="text-lg font-bold text-slate-800 mb-4">
+              {lang === "mr" ? "वार्षिक कर आकारणी व थकबाकी तपशील" : "Annual Assessment & Dues History"}
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse min-w-[700px]">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-100 text-slate-400 font-semibold uppercase">
+                    <th className="p-4">{lang === "mr" ? "आर्थिक वर्ष" : "Financial Year"}</th>
+                    <th className="p-4">{lang === "mr" ? "आकारलेली घरपट्टी" : "Assessed House Tax"}</th>
+                    <th className="p-4">{lang === "mr" ? "आकारलेली पाणीपट्टी" : "Assessed Water Tax"}</th>
+                    <th className="p-4 text-green-600">{lang === "mr" ? "भरलेली घरपट्टी" : "Paid House Tax"}</th>
+                    <th className="p-4 text-green-600">{lang === "mr" ? "भरलेली पाणीपट्टी" : "Paid Water Tax"}</th>
+                    <th className="p-4 text-orange-600">{lang === "mr" ? "उर्वरित घरपट्टी" : "Pending House Tax"}</th>
+                    <th className="p-4 text-orange-600">{lang === "mr" ? "उर्वरित पाणीपट्टी" : "Pending Water Tax"}</th>
+                    <th className="p-4 font-bold text-slate-700">{lang === "mr" ? "एकूण येणे" : "Total Pending"}</th>
+                  </tr>
+                </thead>
+                 <tbody className="divide-y divide-slate-50 text-slate-700">
+                  {property.yearDues.map((yd) => {
+                    const houseTaxDue = Number(yd.houseTaxDue || 0);
+                    const waterTaxDue = Number(yd.waterTaxDue || 0);
+                    const totalFyPending = houseTaxDue + waterTaxDue;
+                    return (
+                      <tr key={yd.id} className="hover:bg-slate-50/50">
+                        <td className="p-4 font-mono font-bold text-slate-800">
+                          {yd.financialYear}
+                        </td>
+                        <td className="p-4">₹{Number(yd.houseTaxAssessed || 0).toFixed(2)}</td>
+                        <td className="p-4">₹{Number(yd.waterTaxAssessed || 0).toFixed(2)}</td>
+                        <td className="p-4 text-green-700 bg-green-50/30">₹{Number(yd.houseTaxPaid || 0).toFixed(2)}</td>
+                        <td className="p-4 text-green-700 bg-green-50/30">₹{Number(yd.waterTaxPaid || 0).toFixed(2)}</td>
+                        <td className="p-4 text-orange-700 bg-orange-50/20 font-medium">
+                          <div className="flex items-center justify-between gap-1">
+                            <span>₹{houseTaxDue.toFixed(2)}</span>
+                            {houseTaxDue > 0 && (
+                              <button
+                                onClick={() => handlePayClick("house_tax", houseTaxDue, yd.financialYear)}
+                                className="px-1.5 py-0.5 bg-orange-600 hover:bg-orange-500 text-white rounded text-[10px] font-bold cursor-pointer"
+                              >
+                                {lang === "mr" ? "भरा" : "Pay"}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-4 text-orange-700 bg-orange-50/20 font-medium">
+                          <div className="flex items-center justify-between gap-1">
+                            <span>₹{waterTaxDue.toFixed(2)}</span>
+                            {waterTaxDue > 0 && (
+                              <button
+                                onClick={() => handlePayClick("water_tax", waterTaxDue, yd.financialYear)}
+                                className="px-1.5 py-0.5 bg-orange-600 hover:bg-orange-500 text-white rounded text-[10px] font-bold cursor-pointer"
+                              >
+                                {lang === "mr" ? "भरा" : "Pay"}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-4 font-bold text-slate-800">
+                          {totalFyPending > 0 ? (
+                            <span className="text-orange-600">₹{totalFyPending.toFixed(2)}</span>
+                          ) : (
+                            <span className="text-green-600">✅ {lang === "mr" ? "पूर्ण भरणा" : "Fully Paid"}</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </main>
 
       <Footer />
@@ -351,6 +427,7 @@ export default function CitizenDashboard({ params }: { params: Promise<{ propert
           ownerName={property.ownerName}
           taxType={selectedTax}
           amount={paymentAmount}
+          financialYear={paymentFy}
         />
       )}
 

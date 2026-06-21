@@ -745,20 +745,94 @@ async function main() {
 
   console.log('──────────────────────────────────────────────');
 
-  // 2. Seed properties
-  console.log('🏠 मालमत्ता (properties) जोडत आहे...');
-  for (const prop of properties) {
-    const created = await prisma.property.create({ data: prop });
-    console.log(`   ✔ ${created.propertyNo} – ${created.ownerName}`);
+  // Helper map to collect paid amounts from seed transactions for 2025-26
+  const txnSummaries: Record<string, { housePaid: number; waterPaid: number }> = {};
+  for (const txn of transactions) {
+    if (txn.status !== 'SUCCESS' || txn.financialYear !== '2025-26') continue;
+    const rawTaxType = txn.taxType;
+    const taxType = (rawTaxType === 'sanitary_tax' || rawTaxType === 'light_tax') ? 'house_tax' : rawTaxType;
+    
+    if (!txnSummaries[txn.propertyNo]) {
+      txnSummaries[txn.propertyNo] = { housePaid: 0, waterPaid: 0 };
+    }
+    
+    if (taxType === 'house_tax') {
+      txnSummaries[txn.propertyNo].housePaid += Number(txn.amountPaid);
+    } else if (taxType === 'water_tax') {
+      txnSummaries[txn.propertyNo].waterPaid += Number(txn.amountPaid);
+    }
   }
-  console.log(`   📊 एकूण ${properties.length} मालमत्ता जोडल्या`);
+
+  // 2. Seed properties (both 2025-26 and 2026-27 records)
+  console.log('🏠 मालमत्ता (properties) आर्थिक वर्ष निहाय जोडत आहे...');
+  
+  // Seed 2025-26
+  for (const prop of properties) {
+    const { sanitaryTaxDue, lightTaxDue, ...rest } = prop as any;
+    const houseDueVal = Number(prop.houseTaxDue) + Number(sanitaryTaxDue || 0) + Number(lightTaxDue || 0);
+    const waterDueVal = Number(prop.waterTaxDue);
+
+    // Calculate year dues values
+    const summary = txnSummaries[prop.propertyNo] || { housePaid: 0, waterPaid: 0 };
+    const houseTaxPaidVal = summary.housePaid;
+    const waterTaxPaidVal = summary.waterPaid;
+    const houseTaxAssessedVal = houseDueVal + houseTaxPaidVal;
+    const waterTaxAssessedVal = waterDueVal + waterTaxPaidVal;
+
+    const created = await prisma.property.create({
+      data: {
+        ...rest,
+        financialYear: '2025-26',
+        houseTaxAssessed: new Prisma.Decimal(houseTaxAssessedVal),
+        waterTaxAssessed: new Prisma.Decimal(waterTaxAssessedVal),
+        houseTaxPaid: new Prisma.Decimal(houseTaxPaidVal),
+        waterTaxPaid: new Prisma.Decimal(waterTaxPaidVal),
+        houseTaxDue: new Prisma.Decimal(houseDueVal),
+        waterTaxDue: new Prisma.Decimal(waterDueVal)
+      }
+    });
+    console.log(`   ✔ ${created.propertyNo} – ${created.ownerName} (2025-26 जोडली)`);
+  }
+
+  // Seed 2026-27
+  for (const prop of properties) {
+    const { sanitaryTaxDue, lightTaxDue, ...rest } = prop as any;
+    const houseDueVal = Number(prop.houseTaxDue) + Number(sanitaryTaxDue || 0) + Number(lightTaxDue || 0);
+    const waterDueVal = Number(prop.waterTaxDue);
+
+    // Use baseline value for assessment
+    const houseAssessedVal = houseDueVal > 0 ? houseDueVal : 1200;
+    const waterAssessedVal = waterDueVal > 0 ? waterDueVal : 600;
+
+    const created = await prisma.property.create({
+      data: {
+        ...rest,
+        financialYear: '2026-27',
+        houseTaxAssessed: new Prisma.Decimal(houseAssessedVal),
+        waterTaxAssessed: new Prisma.Decimal(waterAssessedVal),
+        houseTaxPaid: new Prisma.Decimal(0),
+        waterTaxPaid: new Prisma.Decimal(0),
+        houseTaxDue: new Prisma.Decimal(houseAssessedVal),
+        waterTaxDue: new Prisma.Decimal(waterAssessedVal)
+      }
+    });
+    console.log(`   ✔ ${created.propertyNo} – ${created.ownerName} (2026-27 जोडली)`);
+  }
+  
+  console.log(`   📊 एकूण ${properties.length * 2} मालमत्ता रेकॉर्ड जोडले`);
 
   console.log('──────────────────────────────────────────────');
 
   // 3. Seed transactions
   console.log('💰 व्यवहार (transactions) जोडत आहे...');
   for (const txn of transactions) {
-    const created = await prisma.transaction.create({ data: txn });
+    const taxType = (txn.taxType === 'sanitary_tax' || txn.taxType === 'light_tax') ? 'house_tax' : txn.taxType;
+    const created = await prisma.transaction.create({
+      data: {
+        ...txn,
+        taxType
+      }
+    });
     console.log(
       `   ✔ ${created.transactionId} – ₹${created.amountPaid} (${created.taxType}, ${created.paymentMethod}) [${created.status}]`
     );

@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { runWithFallback, mockDb } from '@/lib/dbFallback'
 
 // Simple admin authentication check via API key
 function isAdmin(request: NextRequest): boolean {
@@ -25,40 +26,48 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const ward = searchParams.get('ward')
     const showDefaultersOnly = searchParams.get('defaulters') === 'true'
+    const year = searchParams.get('year') || '2025-26'
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const where: any = { isActive: true }
+    const where: any = { isActive: true, financialYear: year }
 
     if (ward && ['1', '2', '3'].includes(ward)) {
       where.wardNo = parseInt(ward, 10)
     }
 
-    const properties = await prisma.property.findMany({
-      where,
-      orderBy: { propertyNo: 'asc' },
-      include: {
-        _count: {
-          select: { transactions: true },
+    const properties = await runWithFallback(
+      () => prisma.property.findMany({
+        where,
+        orderBy: { propertyNo: 'asc' },
+        include: {
+          _count: {
+            select: { transactions: true },
+          },
         },
-      },
-    })
+      }),
+      () => {
+        const res = mockDb.searchProperties(undefined, ward || undefined, 0, 1000, year);
+        return res.properties.map(p => ({
+          ...p,
+          _count: {
+            transactions: mockDb.transactions.filter(t => t.propertyNo === p.propertyNo && t.financialYear === year).length
+          }
+        })) as any;
+      }
+    )
 
-    let result = properties.map((p) => ({
+    let result = properties.map((p: any) => ({
       ...p,
       houseTaxDue: Number(p.houseTaxDue),
       waterTaxDue: Number(p.waterTaxDue),
-      sanitaryTaxDue: Number(p.sanitaryTaxDue),
-      lightTaxDue: Number(p.lightTaxDue),
       totalDue:
         Number(p.houseTaxDue) +
-        Number(p.waterTaxDue) +
-        Number(p.sanitaryTaxDue) +
-        Number(p.lightTaxDue),
+        Number(p.waterTaxDue),
       transactionCount: p._count.transactions,
     }))
 
     if (showDefaultersOnly) {
-      result = result.filter((p) => p.totalDue > 0)
+      result = result.filter((p: any) => p.totalDue > 0)
     }
 
     return NextResponse.json({
@@ -101,8 +110,7 @@ export async function POST(request: NextRequest) {
       address,
       houseTaxDue,
       waterTaxDue,
-      sanitaryTaxDue,
-      lightTaxDue,
+      financialYear,
     } = body
 
     // Validate required fields
@@ -117,36 +125,136 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check if property number already exists
-    const existing = await prisma.property.findUnique({
-      where: { propertyNo: propertyNo.toUpperCase() },
-    })
+    // Determine target financial year (April to March)
+    const now = new Date()
+    const month = now.getMonth() // 0-indexed
+    const currentFy =
+      month >= 3 // April onwards
+        ? `${now.getFullYear()}-${String(now.getFullYear() + 1).slice(2)}`
+        : `${now.getFullYear() - 1}-${String(now.getFullYear()).slice(2)}`
+    const fy = financialYear || currentFy
+
+    // Check if property number already exists for this financial year
+    const existing = await runWithFallback(
+      () => prisma.property.findUnique({
+        where: {
+          propertyNo_financialYear: {
+            propertyNo: propertyNo.toUpperCase(),
+            financialYear: fy,
+          },
+        },
+      }),
+      () => {
+        return mockDb.properties.find(
+          (p) =>
+            p.propertyNo.toUpperCase() === propertyNo.toUpperCase() &&
+            p.financialYear === fy
+        ) as any;
+      }
+    )
+
+    let property;
+    const houseDue = parseFloat(houseTaxDue || '0')
+    const waterDue = parseFloat(waterTaxDue || '0')
 
     if (existing) {
-      return NextResponse.json(
-        { success: false, message: `मालमत्ता क्रमांक '${propertyNo}' आधीपासून अस्तित्वात आहे.` },
-        { status: 409 }
+      const oldHouseDue = Number(existing.houseTaxDue)
+      const oldWaterDue = Number(existing.waterTaxDue)
+      const oldHouseAssessed = Number(existing.houseTaxAssessed)
+      const oldWaterAssessed = Number(existing.waterTaxAssessed)
+
+      const diffHouse = houseDue - oldHouseDue
+      const diffWater = waterDue - oldWaterDue
+
+      property = await runWithFallback(
+        () => prisma.property.update({
+          where: {
+            propertyNo_financialYear: {
+              propertyNo: propertyNo.toUpperCase(),
+              financialYear: fy,
+            },
+          },
+          data: {
+            ownerName,
+            ownerNameEn: ownerNameEn || null,
+            mobileNumber,
+            wardNo: parseInt(wardNo, 10),
+            address: address || null,
+            houseTaxDue: houseDue,
+            waterTaxDue: waterDue,
+            houseTaxAssessed: oldHouseAssessed + diffHouse,
+            waterTaxAssessed: oldWaterAssessed + diffWater,
+            isActive: true,
+          },
+        }),
+        () => {
+          const idx = mockDb.properties.findIndex(
+            (p) =>
+              p.propertyNo.toUpperCase() === propertyNo.toUpperCase() &&
+              p.financialYear === fy
+          )
+          if (idx === -1) throw new Error("Property not found");
+
+          const p = mockDb.properties[idx]
+
+          p.houseTaxDue = houseDue
+          p.houseTaxAssessed += diffHouse
+          p.waterTaxDue = waterDue
+          p.waterTaxAssessed += diffWater
+
+          p.ownerName = ownerName
+          p.ownerNameEn = ownerNameEn || null
+          p.mobileNumber = mobileNumber
+          p.wardNo = parseInt(wardNo, 10)
+          p.address = address || null
+          p.isActive = true
+          p.updatedAt = new Date()
+
+          return p as any;
+        }
+      )
+    } else {
+      property = await runWithFallback(
+        () => prisma.property.create({
+          data: {
+            propertyNo: propertyNo.toUpperCase(),
+            financialYear: fy,
+            ownerName,
+            ownerNameEn: ownerNameEn || null,
+            mobileNumber,
+            wardNo: parseInt(wardNo, 10),
+            address: address || null,
+            houseTaxAssessed: houseDue,
+            waterTaxAssessed: waterDue,
+            houseTaxPaid: 0,
+            waterTaxPaid: 0,
+            houseTaxDue: houseDue,
+            waterTaxDue: waterDue,
+          },
+        }),
+        () => {
+          const res = mockDb.createProperty({
+            propertyNo: propertyNo.toUpperCase(),
+            ownerName,
+            ownerNameEn,
+            mobileNumber,
+            wardNo: parseInt(wardNo, 10),
+            address,
+            houseTaxDue: houseDue,
+            waterTaxDue: waterDue,
+            financialYear: fy,
+          });
+          if (!res.success) throw new Error(res.message);
+          return res.data as any;
+        }
       )
     }
 
-    const property = await prisma.property.create({
-      data: {
-        propertyNo: propertyNo.toUpperCase(),
-        ownerName,
-        ownerNameEn: ownerNameEn || null,
-        mobileNumber,
-        wardNo: parseInt(wardNo, 10),
-        address: address || null,
-        houseTaxDue: parseFloat(houseTaxDue || '0'),
-        waterTaxDue: parseFloat(waterTaxDue || '0'),
-        sanitaryTaxDue: parseFloat(sanitaryTaxDue || '0'),
-        lightTaxDue: parseFloat(lightTaxDue || '0'),
-      },
-    })
-
     return NextResponse.json({
       success: true,
-      message: `मालमत्ता '${property.propertyNo}' यशस्वीरित्या जोडली.`,
+      message: existing
+        ? `मालमत्ता '${property.propertyNo}' यशस्वीरित्या अपडेट केली.`
+        : `मालमत्ता '${property.propertyNo}' यशस्वीरित्या जोडली.`,
       data: property,
     })
   } catch (error) {
@@ -174,7 +282,7 @@ export async function PUT(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { propertyNo, ...updateData } = body
+    const { propertyNo, financialYear, ...updateData } = body
 
     if (!propertyNo) {
       return NextResponse.json(
@@ -182,6 +290,15 @@ export async function PUT(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    // Determine financial year (April to March)
+    const now = new Date()
+    const month = now.getMonth() // 0-indexed
+    const currentFy =
+      month >= 3 // April onwards
+        ? `${now.getFullYear()}-${String(now.getFullYear() + 1).slice(2)}`
+        : `${now.getFullYear() - 1}-${String(now.getFullYear()).slice(2)}`
+    const fy = financialYear || currentFy
 
     // Build update object (only include provided fields)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -191,30 +308,99 @@ export async function PUT(request: NextRequest) {
     if (updateData.mobileNumber) data.mobileNumber = updateData.mobileNumber
     if (updateData.wardNo) data.wardNo = parseInt(updateData.wardNo, 10)
     if (updateData.address !== undefined) data.address = updateData.address
-    if (updateData.houseTaxDue !== undefined)
-      data.houseTaxDue = parseFloat(updateData.houseTaxDue)
-    if (updateData.waterTaxDue !== undefined)
-      data.waterTaxDue = parseFloat(updateData.waterTaxDue)
-    if (updateData.sanitaryTaxDue !== undefined)
-      data.sanitaryTaxDue = parseFloat(updateData.sanitaryTaxDue)
-    if (updateData.lightTaxDue !== undefined)
-      data.lightTaxDue = parseFloat(updateData.lightTaxDue)
     if (updateData.isActive !== undefined) data.isActive = updateData.isActive
 
-    const property = await prisma.property.update({
-      where: { propertyNo: propertyNo.toUpperCase() },
-      data,
-    })
+    const property = await runWithFallback(
+      () => prisma.$transaction(async (tx) => {
+        // Fetch existing property to check dues and calculate diff
+        const existingProperty = await tx.property.findUnique({
+          where: {
+            propertyNo_financialYear: {
+              propertyNo: propertyNo.toUpperCase(),
+              financialYear: fy,
+            },
+          },
+        })
+
+        if (!existingProperty) {
+          throw new Error(`मालमत्ता क्रमांक '${propertyNo}' आणि आर्थिक वर्ष '${fy}' साठी रेकॉर्ड सापडला नाही.`)
+        }
+
+        const oldHouseDue = Number(existingProperty.houseTaxDue)
+        const oldWaterDue = Number(existingProperty.waterTaxDue)
+        const oldHouseAssessed = Number(existingProperty.houseTaxAssessed)
+        const oldWaterAssessed = Number(existingProperty.waterTaxAssessed)
+
+        if (updateData.houseTaxDue !== undefined) {
+          const newDue = parseFloat(updateData.houseTaxDue)
+          const diff = newDue - oldHouseDue
+          data.houseTaxDue = newDue
+          data.houseTaxAssessed = oldHouseAssessed + diff
+        }
+        if (updateData.waterTaxDue !== undefined) {
+          const newDue = parseFloat(updateData.waterTaxDue)
+          const diff = newDue - oldWaterDue
+          data.waterTaxDue = newDue
+          data.waterTaxAssessed = oldWaterAssessed + diff
+        }
+
+        // Update the property details
+        const prop = await tx.property.update({
+          where: {
+            propertyNo_financialYear: {
+              propertyNo: propertyNo.toUpperCase(),
+              financialYear: fy,
+            },
+          },
+          data,
+        })
+
+        return prop
+      }),
+      () => {
+        const idx = mockDb.properties.findIndex(
+          (p) =>
+            p.propertyNo.toUpperCase() === propertyNo.toUpperCase() &&
+            p.financialYear === fy
+        )
+        if (idx === -1) throw new Error("Property not found");
+
+        const p = mockDb.properties[idx]
+
+        if (updateData.houseTaxDue !== undefined) {
+          const newDue = parseFloat(updateData.houseTaxDue)
+          const diff = newDue - p.houseTaxDue
+          p.houseTaxDue = newDue
+          p.houseTaxAssessed += diff
+        }
+        if (updateData.waterTaxDue !== undefined) {
+          const newDue = parseFloat(updateData.waterTaxDue)
+          const diff = newDue - p.waterTaxDue
+          p.waterTaxDue = newDue
+          p.waterTaxAssessed += diff
+        }
+
+        if (updateData.ownerName) p.ownerName = updateData.ownerName
+        if (updateData.ownerNameEn !== undefined) p.ownerNameEn = updateData.ownerNameEn
+        if (updateData.mobileNumber) p.mobileNumber = updateData.mobileNumber
+        if (updateData.wardNo) p.wardNo = parseInt(updateData.wardNo, 10)
+        if (updateData.address !== undefined) p.address = updateData.address
+        if (updateData.isActive !== undefined) p.isActive = updateData.isActive
+
+        p.updatedAt = new Date()
+        return p as any
+      }
+    )
 
     return NextResponse.json({
       success: true,
       message: `मालमत्ता '${propertyNo}' यशस्वीरित्या अपडेट केली.`,
       data: property,
     })
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error updating property:', error)
     return NextResponse.json(
-      { success: false, message: 'मालमत्ता अपडेट करताना त्रुटी आली.' },
+      { success: false, message: error.message || 'मालमत्ता अपडेट करताना त्रुटी आली.' },
       { status: 500 }
     )
   }

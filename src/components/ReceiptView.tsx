@@ -34,8 +34,6 @@ interface ReceiptViewProps {
 const taxNames: Record<string, string> = {
   house_tax: "घरपट्टी (House Tax)",
   water_tax: "पाणीपट्टी (Water Tax)",
-  sanitary_tax: "सॅनिटरी कर (Sanitary Tax)",
-  light_tax: "दिवाबत्ती कर (Street Light Tax)",
 };
 
 export default function ReceiptView({ isOpen, onClose, transaction, propertyData }: ReceiptViewProps) {

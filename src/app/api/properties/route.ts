@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { runWithFallback, mockDb } from '@/lib/dbFallback'
 
 /**
  * GET /api/properties
@@ -18,6 +19,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const search = searchParams.get('search')?.trim()
     const ward = searchParams.get('ward')
+    const year = searchParams.get('year')
     const page = parseInt(searchParams.get('page') || '1', 10)
     const limit = parseInt(searchParams.get('limit') || '20', 10)
     const skip = (page - 1) * limit
@@ -26,6 +28,10 @@ export async function GET(request: NextRequest) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = {
       isActive: true,
+    }
+
+    if (year && year !== 'all') {
+      where.financialYear = year
     }
 
     // Ward filter
@@ -44,41 +50,53 @@ export async function GET(request: NextRequest) {
     }
 
     // Execute query with pagination
-    const [properties, total] = await Promise.all([
-      prisma.property.findMany({
-        where,
-        orderBy: { propertyNo: 'asc' },
-        skip,
-        take: limit,
-        select: {
-          id: true,
-          propertyNo: true,
-          ownerName: true,
-          ownerNameEn: true,
-          mobileNumber: true,
-          wardNo: true,
-          address: true,
-          houseTaxDue: true,
-          waterTaxDue: true,
-          sanitaryTaxDue: true,
-          lightTaxDue: true,
-        },
-      }),
-      prisma.property.count({ where }),
-    ])
+    const [properties, total] = await runWithFallback(
+      () => Promise.all([
+        prisma.property.findMany({
+          where,
+          orderBy: (!year || year === 'all')
+            ? [
+                { propertyNo: 'asc' },
+                { financialYear: 'desc' },
+              ]
+            : { propertyNo: 'asc' } as any,
+          distinct: (!year || year === 'all') ? ['propertyNo'] : undefined,
+          skip,
+          take: limit,
+          select: {
+            id: true,
+            propertyNo: true,
+            financialYear: true,
+            ownerName: true,
+            ownerNameEn: true,
+            mobileNumber: true,
+            wardNo: true,
+            address: true,
+            houseTaxDue: true,
+            waterTaxDue: true,
+          },
+        }),
+        (!year || year === 'all')
+          ? prisma.property.groupBy({
+              by: ['propertyNo'],
+              where,
+            }).then(groups => groups.length)
+          : prisma.property.count({ where }),
+      ]),
+      () => {
+        const res = mockDb.searchProperties(search || undefined, ward || undefined, skip, limit, year || undefined);
+        return [res.properties, res.total] as any;
+      }
+    );
 
     // Calculate total_due for each property
-    const propertiesWithTotal = properties.map((p) => ({
+    const propertiesWithTotal = properties.map((p: any) => ({
       ...p,
       houseTaxDue: Number(p.houseTaxDue),
       waterTaxDue: Number(p.waterTaxDue),
-      sanitaryTaxDue: Number(p.sanitaryTaxDue),
-      lightTaxDue: Number(p.lightTaxDue),
       totalDue:
         Number(p.houseTaxDue) +
-        Number(p.waterTaxDue) +
-        Number(p.sanitaryTaxDue) +
-        Number(p.lightTaxDue),
+        Number(p.waterTaxDue),
     }))
 
     return NextResponse.json({

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import ReceiptView from "@/components/ReceiptView";
+import { useLanguage } from "@/context/LanguageContext";
 
 interface Defaulter {
   propertyNo: string;
@@ -24,8 +25,6 @@ interface Property {
   address: string | null;
   houseTaxDue: number;
   waterTaxDue: number;
-  sanitaryTaxDue: number;
-  lightTaxDue: number;
   totalDue: number;
   transactionCount: number;
 }
@@ -42,8 +41,6 @@ interface Stats {
   taxBreakdown: {
     houseTax: { collected: number; pending: number };
     waterTax: { collected: number; pending: number };
-    sanitaryTax: { collected: number; pending: number };
-    lightTax: { collected: number; pending: number };
   };
   paymentMethods: {
     online: number;
@@ -71,14 +68,23 @@ const ADMIN_KEY = "dhamner-admin-secret-key-2026";
 export default function AdminDashboard() {
   const router = useRouter();
   const [authChecked, setAuthChecked] = useState(false);
-  const [activeTab, setActiveTab] = useState<"overview" | "defaulters" | "cash" | "properties" | "import">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "defaulters" | "cash" | "properties" | "import" | "assess">("overview");
+  const { lang, toggleLang, t } = useLanguage();
 
   // State data
   const [stats, setStats] = useState<Stats | null>(null);
   const [wardFilter, setWardFilter] = useState("all");
+  const [selectedFy, setSelectedFy] = useState("2025-26");
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [cashFy, setCashFy] = useState("2025-26");
+
+  // Assess rollover states
+  const [assessFy, setAssessFy] = useState("2026-27");
+  const [assessPropertyNo, setAssessPropertyNo] = useState("");
+  const [assessSuccessMsg, setAssessSuccessMsg] = useState("");
+  const [assessErrorMsg, setAssessErrorMsg] = useState("");
   
   // Search query states
   const [defaulterSearch, setDefaulterSearch] = useState("");
@@ -103,9 +109,8 @@ export default function AdminDashboard() {
   const [propFormAddress, setPropFormAddress] = useState("");
   const [propFormHouse, setPropFormHouse] = useState("0");
   const [propFormWater, setPropFormWater] = useState("0");
-  const [propFormSanitary, setPropFormSanitary] = useState("0");
-  const [propFormLight, setPropFormLight] = useState("0");
   const [propFormError, setPropFormError] = useState("");
+  const [propFormFy, setPropFormFy] = useState("2025-26");
 
   // Bulk import states
   const [csvFileContent, setCsvFileContent] = useState("");
@@ -128,13 +133,13 @@ export default function AdminDashboard() {
     setLoading(true);
     try {
       // 1. Fetch Stats
-      const statsRes = await fetch(`/api/admin/stats?ward=${wardFilter}`, {
+      const statsRes = await fetch(`/api/admin/stats?ward=${wardFilter}&year=${selectedFy}`, {
         headers: { "x-admin-key": ADMIN_KEY },
       });
       const statsData = await statsRes.json();
 
       // 2. Fetch all properties
-      const propsRes = await fetch(`/api/admin/properties?ward=${wardFilter === "all" ? "" : wardFilter}`, {
+      const propsRes = await fetch(`/api/admin/properties?ward=${wardFilter === "all" ? "" : wardFilter}&year=${selectedFy}`, {
         headers: { "x-admin-key": ADMIN_KEY },
       });
       const propsData = await propsRes.json();
@@ -150,31 +155,88 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     loadDashboardData();
-  }, [authChecked, wardFilter]);
+  }, [authChecked, wardFilter, selectedFy]);
+
+  useEffect(() => {
+    if (!cashSelectedProperty) return;
+
+    const yearDueRecord = (cashSelectedProperty as any).yearDues?.find((yd: any) => yd.financialYear === cashFy) || {
+      houseTaxDue: 0,
+      waterTaxDue: 0,
+    };
+
+    const dueAmount = cashTaxType === "house_tax" ? yearDueRecord.houseTaxDue : yearDueRecord.waterTaxDue;
+    setCashAmount(dueAmount > 0 ? dueAmount.toString() : "0");
+  }, [cashFy, cashTaxType, cashSelectedProperty]);
 
   if (!authChecked) return null;
 
-  // Handle cash collection property lookup
-  const handleCashPropertyLookup = () => {
-    const found = properties.find(p => p.propertyNo.toUpperCase() === cashPropertyNo.trim().toUpperCase());
-    if (found) {
-      setCashSelectedProperty(found);
-      // Pre-fill amount with selected tax outstanding due
-      const currentTaxDue = getTaxDueAmount(found, cashTaxType);
-      setCashAmount(currentTaxDue > 0 ? currentTaxDue.toString() : "");
-    } else {
-      setCashSelectedProperty(null);
-      alert("मालमत्ता क्रमांक सापडला नाही! कृपया तपासा.");
+  // Handle cash collection property lookup — search by property no, owner name, or mobile
+  const handleCashPropertyLookup = async () => {
+    const query = cashPropertyNo.trim().toUpperCase();
+    if (!query) {
+      alert(lang === "mr" ? "कृपया शोध माहिती प्रविष्ट करा." : "Please enter a search query.");
+      return;
     }
-  };
 
-  const getTaxDueAmount = (prop: Property, type: string): number => {
-    switch (type) {
-      case "house_tax": return prop.houseTaxDue;
-      case "water_tax": return prop.waterTaxDue;
-      case "sanitary_tax": return prop.sanitaryTaxDue;
-      case "light_tax": return prop.lightTaxDue;
-      default: return 0;
+    let propNo = query;
+    const foundLocal = properties.find(p =>
+      p.propertyNo.toUpperCase() === query ||
+      p.ownerName.toLowerCase().includes(query.toLowerCase()) ||
+      (p.ownerNameEn && p.ownerNameEn.toLowerCase().includes(query.toLowerCase())) ||
+      p.mobileNumber.includes(query)
+    );
+    if (foundLocal) {
+      propNo = foundLocal.propertyNo;
+    } else {
+      // Fallback to searching all properties via the search API to support search across wards/years
+      try {
+        setLoading(true);
+        const searchRes = await fetch(`/api/properties?search=${encodeURIComponent(cashPropertyNo.trim())}&year=${cashFy}`);
+        const searchData = await searchRes.json();
+        if (searchData.success && searchData.data && searchData.data.length > 0) {
+          propNo = searchData.data[0].propertyNo;
+        }
+      } catch (err) {
+        console.error("Error doing remote lookup:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    try {
+      setLoading(true);
+      const res = await fetch(`/api/properties/${propNo}`);
+      const data = await res.json();
+      setLoading(false);
+
+      if (data.success && data.data) {
+        const fullProp = data.data;
+        setCashSelectedProperty(fullProp);
+        
+        const yearDueRecord = fullProp.yearDues?.find((yd: any) => yd.financialYear === cashFy) || {
+          houseTaxDue: 0,
+          waterTaxDue: 0,
+        };
+
+        let selectedType = "house_tax";
+        if (yearDueRecord.houseTaxDue > 0) {
+          selectedType = "house_tax";
+        } else if (yearDueRecord.waterTaxDue > 0) {
+          selectedType = "water_tax";
+        }
+        setCashTaxType(selectedType);
+
+        const dueAmount = selectedType === "house_tax" ? yearDueRecord.houseTaxDue : yearDueRecord.waterTaxDue;
+        setCashAmount(dueAmount > 0 ? dueAmount.toString() : "0");
+      } else {
+        setCashSelectedProperty(null);
+        alert(lang === "mr" ? "खाते सापडले नाही! कृपया मालमत्ता क्रमांक, नाव किंवा मोबाईल क्रमांक तपासा." : "Account not found! Please check property number, name, or mobile number.");
+      }
+    } catch (err) {
+      setLoading(false);
+      console.error(err);
+      alert("खाते शोधताना अडचण आली.");
     }
   };
 
@@ -195,6 +257,7 @@ export default function AdminDashboard() {
           paymentMethod: "CASH",
           recordedBy: "ग्रामसेवक",
           notes: cashNotes || "ग्रामपंचायत कार्यालयात रोख भरणा",
+          financialYear: cashFy,
         }),
       });
 
@@ -247,8 +310,7 @@ export default function AdminDashboard() {
           address: propFormAddress || null,
           houseTaxDue: parseFloat(propFormHouse || "0"),
           waterTaxDue: parseFloat(propFormWater || "0"),
-          sanitaryTaxDue: parseFloat(propFormSanitary || "0"),
-          lightTaxDue: parseFloat(propFormLight || "0")
+          financialYear: propFormFy,
         })
       });
 
@@ -263,8 +325,6 @@ export default function AdminDashboard() {
         setPropFormAddress("");
         setPropFormHouse("0");
         setPropFormWater("0");
-        setPropFormSanitary("0");
-        setPropFormLight("0");
         // Reload
         loadDashboardData();
       } else {
@@ -319,14 +379,36 @@ export default function AdminDashboard() {
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      // Basic CSV splitting (handling quotes optionally, but for simplicity split by comma)
-      const values = row.split(",");
+      // Robust CSV splitting that respects quotes
+      const values: string[] = [];
+      let currentVal = '';
+      let inQuotes = false;
+      for (let charIdx = 0; charIdx < row.length; charIdx++) {
+        const char = row[charIdx];
+        if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+          values.push(currentVal.trim());
+          currentVal = '';
+        } else {
+          currentVal += char;
+        }
+      }
+      values.push(currentVal.trim());
+
       if (values.length < 4) continue;
 
       const propData: any = {};
       headers.forEach((header, idx) => {
         propData[header] = values[idx]?.replace(/^["']|["']$/g, "").trim();
       });
+
+      let mobile = propData.mobilenumber || "";
+      if (mobile && /^[0-9.]+[eE]\+?[0-9]+$/.test(mobile)) {
+        try {
+          mobile = String(Number(mobile));
+        } catch (e) {}
+      }
 
       try {
         const res = await fetch("/api/admin/properties", {
@@ -339,13 +421,12 @@ export default function AdminDashboard() {
             propertyNo: propData.propertyno,
             ownerName: propData.ownername,
             ownerNameEn: propData.ownernameen || null,
-            mobileNumber: propData.mobilenumber,
+            mobileNumber: mobile,
             wardNo: parseInt(propData.wardno || "1", 10),
             address: propData.address || null,
             houseTaxDue: parseFloat(propData.housetaxdue || "0"),
             waterTaxDue: parseFloat(propData.watertaxdue || "0"),
-            sanitaryTaxDue: parseFloat(propData.sanitarytaxdue || "0"),
-            lightTaxDue: parseFloat(propData.lighttaxdue || "0")
+            financialYear: propData.financialyear || selectedFy,
           })
         });
 
@@ -375,18 +456,30 @@ export default function AdminDashboard() {
   };
 
   // Filters search outputs
-  const filteredDefaulters = stats?.defaulters.list.filter(d => 
-    d.ownerName.includes(defaulterSearch) || 
-    d.propertyNo.toLowerCase().includes(defaulterSearch.toLowerCase())
-  ) || [];
+  const filteredDefaulters = stats?.defaulters.list.filter(d => {
+    const q = defaulterSearch.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      d.ownerName.toLowerCase().includes(q) ||
+      (d.ownerNameEn && d.ownerNameEn.toLowerCase().includes(q)) ||
+      d.propertyNo.toLowerCase().includes(q) ||
+      (d.mobileNumber && d.mobileNumber.includes(q))
+    );
+  }) || [];
 
-  const filteredProperties = properties.filter(p => 
-    p.ownerName.includes(propertySearch) || 
-    p.propertyNo.toLowerCase().includes(propertySearch.toLowerCase())
-  ) || [];
+  const filteredProperties = properties.filter(p => {
+    const q = propertySearch.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      p.ownerName.toLowerCase().includes(q) ||
+      (p.ownerNameEn && p.ownerNameEn.toLowerCase().includes(q)) ||
+      p.propertyNo.toLowerCase().includes(q) ||
+      (p.mobileNumber && p.mobileNumber.includes(q))
+    );
+  }) || [];
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50/50">
+    <div className="min-h-screen flex flex-col bg-slate-50">
       <Navbar />
 
       <div className="flex-1 flex flex-col md:flex-row max-w-7xl w-full mx-auto px-4 py-8 gap-6">
@@ -394,27 +487,48 @@ export default function AdminDashboard() {
         {/* Left Side Tab Navigation */}
         <aside className="w-full md:w-64 shrink-0 space-y-2">
           <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm space-y-1">
-            <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 mb-2">मुख्य मेनू</span>
+            <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 mb-2">
+              {lang === "mr" ? "मुख्य मेनू" : "Main Menu"}
+            </span>
             
-            <SidebarBtn active={activeTab === "overview"} onClick={() => setActiveTab("overview")} icon="📊" label="वसुली आकडेवारी" />
-            <SidebarBtn active={activeTab === "defaulters"} onClick={() => setActiveTab("defaulters")} icon="⚠️" label="थकबाकीदार यादी" />
-            <SidebarBtn active={activeTab === "cash"} onClick={() => setActiveTab("cash")} icon="💵" label="रोख कर भरणा" />
-            <SidebarBtn active={activeTab === "properties"} onClick={() => setActiveTab("properties")} icon="🏠" label="मालमत्ता यादी" />
-            <SidebarBtn active={activeTab === "import"} onClick={() => setActiveTab("import")} icon="📥" label="डेटा आयात (Import)" />
+            <SidebarBtn active={activeTab === "overview"} onClick={() => setActiveTab("overview")} icon="📊" label={lang === "mr" ? "वसुली आकडेवारी" : "Collection Stats"} />
+            <SidebarBtn active={activeTab === "defaulters"} onClick={() => setActiveTab("defaulters")} icon="⚠️" label={lang === "mr" ? "थकबाकीदार यादी" : "Defaulters List"} />
+            <SidebarBtn active={activeTab === "cash"} onClick={() => setActiveTab("cash")} icon="💵" label={lang === "mr" ? "रोख कर भरणा" : "Record Cash"} />
+            <SidebarBtn active={activeTab === "properties"} onClick={() => setActiveTab("properties")} icon="🏠" label={lang === "mr" ? "मालमत्ता यादी" : "Properties List"} />
+            <SidebarBtn active={activeTab === "import"} onClick={() => setActiveTab("import")} icon="📥" label={lang === "mr" ? "डेटा आयात (Import)" : "Import Data"} />
+            <SidebarBtn active={activeTab === "assess"} onClick={() => setActiveTab("assess")} icon="⚙️" label={lang === "mr" ? "आकारणी व rollover" : "Assessment & Rollover"} />
           </div>
 
           {/* Quick Ward Selector */}
           <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">प्रभाग निवडा</label>
+            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">
+              {lang === "mr" ? "प्रभाग निवडा" : "Select Ward"}
+            </label>
             <select
               value={wardFilter}
               onChange={(e) => setWardFilter(e.target.value)}
               className="w-full px-3 py-2 bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none"
             >
-              <option value="all">सर्व प्रभाग (All Wards)</option>
-              <option value="1">प्रभाग १ (Ward 1)</option>
-              <option value="2">प्रभाग २ (Ward 2)</option>
-              <option value="3">प्रभाग ३ (Ward 3)</option>
+              <option value="all">{t("allWards")}</option>
+              <option value="1">{t("ward1")}</option>
+              <option value="2">{t("ward2")}</option>
+              <option value="3">{t("ward3")}</option>
+            </select>
+          </div>
+
+          {/* Financial Year Selector */}
+          <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
+            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">
+              {lang === "mr" ? "आर्थिक वर्ष निवडा" : "Select Financial Year"}
+            </label>
+            <select
+              value={selectedFy}
+              onChange={(e) => setSelectedFy(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none"
+            >
+              <option value="2025-26">2025-26</option>
+              <option value="2026-27">2026-27</option>
+              <option value="2027-28">2027-28</option>
             </select>
           </div>
         </aside>
@@ -427,7 +541,9 @@ export default function AdminDashboard() {
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
               </svg>
-              <p className="text-slate-500 text-sm font-semibold">माहिती लोड होत आहे...</p>
+              <p className="text-slate-500 text-sm font-semibold">
+                {lang === "mr" ? "माहिती लोड होत आहे..." : "Loading data..."}
+              </p>
             </div>
           ) : (
             <>
@@ -435,7 +551,9 @@ export default function AdminDashboard() {
               {activeTab === "overview" && stats && (
                 <div className="space-y-6 animate-in fade-in duration-200">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-xl font-bold text-slate-800">वसुली आकडेवारी (Overview)</h3>
+                    <h3 className="text-xl font-bold text-slate-800">
+                      {lang === "mr" ? "वसुली आकडेवारी (Overview)" : "Collection Stats (Overview)"}
+                    </h3>
                     <span className="text-xs font-semibold bg-slate-100 text-slate-600 px-3 py-1 rounded-lg">
                       FY {stats.financialYear}
                     </span>
@@ -443,42 +561,86 @@ export default function AdminDashboard() {
 
                   {/* Summary Counters */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <StatsCard label="एकूण अपेक्षित वसुली" val={`₹${stats.overview.totalExpected.toLocaleString("mr-IN")}`} color="bg-slate-900 text-white" />
-                    <StatsCard label="एकूण संकलित कर" val={`₹${stats.overview.totalCollected.toLocaleString("mr-IN")}`} color="bg-green-600 text-white" />
-                    <StatsCard label="उर्वरित थकबाकी" val={`₹${stats.overview.totalPending.toLocaleString("mr-IN")}`} color="bg-orange-600 text-white" />
-                    <StatsCard label="वसुली टक्केवारी" val={`${stats.overview.collectionPercentage}%`} color="bg-blue-600 text-white" />
+                    <StatsCard 
+                      label={lang === "mr" ? "एकूण अपेक्षित वसुली" : "Total Expected"} 
+                      val={`₹${stats.overview.totalExpected.toLocaleString("mr-IN")}`} 
+                      borderColor="border-l-slate-900" 
+                      bgColor="bg-white" 
+                      textColor="text-slate-900" 
+                      icon="📈" 
+                    />
+                    <StatsCard 
+                      label={lang === "mr" ? "एकूण संकलित कर" : "Total Collected"} 
+                      val={`₹${stats.overview.totalCollected.toLocaleString("mr-IN")}`} 
+                      borderColor="border-l-green-600" 
+                      bgColor="bg-white" 
+                      textColor="text-green-700" 
+                      icon="✅" 
+                    />
+                    <StatsCard 
+                      label={lang === "mr" ? "उर्वरित थकबाकी" : "Pending Dues"} 
+                      val={`₹${stats.overview.totalPending.toLocaleString("mr-IN")}`} 
+                      borderColor="border-l-orange-600" 
+                      bgColor="bg-white" 
+                      textColor="text-orange-750" 
+                      icon="⏳" 
+                    />
+                    <StatsCard 
+                      label={lang === "mr" ? "वसुली टक्केवारी" : "Collection %"} 
+                      val={`${stats.overview.collectionPercentage}%`} 
+                      borderColor="border-l-blue-600" 
+                      bgColor="bg-white" 
+                      textColor="text-blue-700" 
+                      icon="📊" 
+                    />
                   </div>
 
                   {/* Itemized Dues and collections chart mock */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm">
-                      <h4 className="font-bold text-slate-800 text-sm mb-4">कर प्रकारानुसार आकडेवारी</h4>
+                      <h4 className="font-bold text-slate-800 text-sm mb-4">
+                        {lang === "mr" ? "कर प्रकारानुसार आकडेवारी" : "Tax Type Statistics"}
+                      </h4>
                       <div className="space-y-3.5">
-                        <ProgressBarItem title="घरपट्टी (House Tax)" collected={stats.taxBreakdown.houseTax.collected} pending={stats.taxBreakdown.houseTax.pending} />
-                        <ProgressBarItem title="पाणीपट्टी (Water Tax)" collected={stats.taxBreakdown.waterTax.collected} pending={stats.taxBreakdown.waterTax.pending} />
-                        <ProgressBarItem title="सॅनिटरी कर (Sanitary)" collected={stats.taxBreakdown.sanitaryTax.collected} pending={stats.taxBreakdown.sanitaryTax.pending} />
-                        <ProgressBarItem title="दिवाबत्ती कर (Light Tax)" collected={stats.taxBreakdown.lightTax.collected} pending={stats.taxBreakdown.lightTax.pending} />
+                        <ProgressBarItem title={lang === "mr" ? "घरपट्टी (House Tax)" : "House Tax"} collected={stats.taxBreakdown.houseTax.collected} pending={stats.taxBreakdown.houseTax.pending} />
+                        <ProgressBarItem title={lang === "mr" ? "पाणीपट्टी (Water Tax)" : "Water Tax"} collected={stats.taxBreakdown.waterTax.collected} pending={stats.taxBreakdown.waterTax.pending} />
                       </div>
                     </div>
 
                     <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between">
-                      <h4 className="font-bold text-slate-800 text-sm mb-4">भरणा पद्धती (Payment Methods)</h4>
+                      <h4 className="font-bold text-slate-800 text-sm mb-4">
+                        {lang === "mr" ? "भरणा पद्धती (Payment Methods)" : "Payment Methods"}
+                      </h4>
                       <div className="space-y-4">
                         <div className="flex justify-between items-center text-sm">
-                          <span className="text-slate-500">💻 ऑनलाइन पेमेंट (Gateway):</span>
-                          <span className="font-bold text-slate-800">{stats.paymentMethods.online} व्यवहार</span>
+                          <span className="text-slate-500">
+                            {lang === "mr" ? "💻 ऑनलाइन पेमेंट (Gateway):" : "💻 Online Payment (Gateway):"}
+                          </span>
+                          <span className="font-bold text-slate-800">
+                            {stats.paymentMethods.online} {lang === "mr" ? "व्यवहार" : "Txns"}
+                          </span>
                         </div>
                         <div className="flex justify-between items-center text-sm">
-                          <span className="text-slate-500">💵 रोख भरणा (Cash):</span>
-                          <span className="font-bold text-slate-800">{stats.paymentMethods.cash} व्यवहार</span>
+                          <span className="text-slate-500">
+                            {lang === "mr" ? "💵 रोख भरणा (Cash):" : "💵 Cash Payment:"}
+                          </span>
+                          <span className="font-bold text-slate-800">
+                            {stats.paymentMethods.cash} {lang === "mr" ? "व्यवहार" : "Txns"}
+                          </span>
                         </div>
                         <div className="flex justify-between items-center text-sm">
-                          <span className="text-slate-500">📱 UPI पेमेंट:</span>
-                          <span className="font-bold text-slate-800">{stats.paymentMethods.upi} व्यवहार</span>
+                          <span className="text-slate-500">
+                            {lang === "mr" ? "📱 UPI पेमेंट:" : "📱 UPI Payment:"}
+                          </span>
+                          <span className="font-bold text-slate-800">
+                            {stats.paymentMethods.upi} {lang === "mr" ? "व्यवहार" : "Txns"}
+                          </span>
                         </div>
                       </div>
                       <div className="border-t border-slate-100 mt-4 pt-4 flex justify-between items-center text-xs">
-                        <span className="text-slate-400">एकूण व्यवहार संख्या:</span>
+                        <span className="text-slate-400">
+                          {lang === "mr" ? "एकूण व्यवहार संख्या:" : "Total Transactions:"}
+                        </span>
                         <span className="font-bold text-slate-700">{stats.paymentMethods.totalTransactions}</span>
                       </div>
                     </div>
@@ -487,23 +649,27 @@ export default function AdminDashboard() {
                   {/* Ward wise Breakdown Table */}
                   <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
                     <div className="p-5 border-b border-slate-100">
-                      <h4 className="font-bold text-slate-800 text-sm">प्रभागनिहाय वसुली अहवाल (Ward-wise Summary)</h4>
+                      <h4 className="font-bold text-slate-800 text-sm">
+                        {lang === "mr" ? "प्रभागनिहाय वसुली अहवाल (Ward-wise Summary)" : "Ward-wise Summary Report"}
+                      </h4>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs">
                         <thead>
                           <tr className="bg-slate-50 text-slate-400 font-semibold border-b border-slate-100">
-                            <th className="p-4">प्रभाग क्रमांक</th>
-                            <th className="p-4 text-center">एकूण कुटुंबे (Properties)</th>
-                            <th className="p-4 text-center">थकबाकीदार कुटुंबे</th>
-                            <th className="p-4 text-right">संकलित कर</th>
-                            <th className="p-4 text-right">थकबाकी</th>
+                            <th className="p-4">{lang === "mr" ? "प्रभाग क्रमांक" : "Ward Number"}</th>
+                            <th className="p-4 text-center">{lang === "mr" ? "एकूण कुटुंबे (Properties)" : "Total Properties"}</th>
+                            <th className="p-4 text-center">{lang === "mr" ? "थकबाकीदार कुटुंबे" : "Defaulter Families"}</th>
+                            <th className="p-4 text-right">{lang === "mr" ? "संकलित कर" : "Collected Tax"}</th>
+                            <th className="p-4 text-right">{lang === "mr" ? "थकबाकी" : "Outstanding Dues"}</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-55">
                           {stats.wardStats.map((w) => (
                             <tr key={w.wardNo} className="hover:bg-slate-50/50">
-                              <td className="p-4 font-bold text-slate-800">प्रभाग क्रमांक {w.wardNo}</td>
+                              <td className="p-4 font-bold text-slate-800">
+                                {lang === "mr" ? `प्रभाग क्रमांक ${w.wardNo}` : `Ward No. ${w.wardNo}`}
+                              </td>
                               <td className="p-4 text-center font-semibold text-slate-600">{w.totalProperties}</td>
                               <td className="p-4 text-center font-semibold text-orange-655">{w.propertiesWithDues}</td>
                               <td className="p-4 text-right font-bold text-green-600">₹{w.totalCollected.toLocaleString("mr-IN")}</td>
@@ -521,13 +687,15 @@ export default function AdminDashboard() {
               {activeTab === "defaulters" && stats && (
                 <div className="space-y-6 animate-in fade-in duration-200">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <h3 className="text-xl font-bold text-slate-800">थकबाकीदार यादी (Defaulters)</h3>
+                    <h3 className="text-xl font-bold text-slate-800">
+                      {lang === "mr" ? "थकबाकीदार यादी (Defaulters)" : "Defaulters List"}
+                    </h3>
                     
                     {/* Search bar */}
                     <div className="relative w-full sm:w-64">
                       <input
                         type="text"
-                        placeholder="नाव किंवा मालमत्ता क्र. शोधा..."
+                        placeholder={lang === "mr" ? "नाव किंवा मालमत्ता क्र. शोधा..." : "Search name or property no..."}
                         value={defaulterSearch}
                         onChange={(e) => setDefaulterSearch(e.target.value)}
                         className="w-full h-9 pl-3 pr-8 bg-white border border-slate-200 rounded-xl text-xs focus:ring-1 focus:ring-slate-800 focus:outline-none"
@@ -543,11 +711,11 @@ export default function AdminDashboard() {
                         <table className="w-full text-left text-xs border-collapse">
                           <thead>
                             <tr className="bg-slate-50 border-b border-slate-100 text-slate-400 font-semibold uppercase">
-                              <th className="p-4">मालमत्ता क्र.</th>
-                              <th className="p-4">धारकाचे नाव</th>
-                              <th className="p-4 text-center">प्रभाग</th>
-                              <th className="p-4">मोबाईल</th>
-                              <th className="p-4 text-right">एकूण थकबाकी</th>
+                              <th className="p-4">{lang === "mr" ? "मालमत्ता क्र." : "Property No."}</th>
+                              <th className="p-4">{lang === "mr" ? "धारकाचे नाव" : "Owner Name"}</th>
+                              <th className="p-4 text-center">{lang === "mr" ? "प्रभाग" : "Ward"}</th>
+                              <th className="p-4">{lang === "mr" ? "मोबाईल" : "Mobile"}</th>
+                              <th className="p-4 text-right">{lang === "mr" ? "एकूण थकबाकी" : "Total Dues"}</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50">
@@ -559,7 +727,9 @@ export default function AdminDashboard() {
                                   {d.ownerNameEn && <span className="text-[10px] text-slate-400">{d.ownerNameEn}</span>}
                                 </td>
                                 <td className="p-4 text-center">
-                                  <span className="bg-orange-50 text-orange-600 px-2 py-0.5 rounded text-[10px] font-bold">वॉर्ड {d.wardNo}</span>
+                                  <span className="bg-orange-50 text-orange-600 px-2 py-0.5 rounded text-[10px] font-bold">
+                                    {lang === "mr" ? `वॉर्ड ${d.wardNo}` : `Ward ${d.wardNo}`}
+                                  </span>
                                 </td>
                                 <td className="p-4 text-slate-600">{d.mobileNumber}</td>
                                 <td className="p-4 text-right font-extrabold text-orange-600 text-sm">₹{d.totalDue.toFixed(2)}</td>
@@ -571,7 +741,9 @@ export default function AdminDashboard() {
                     ) : (
                       <div className="p-12 text-center text-slate-400">
                         <span className="text-2xl block mb-2">👍</span>
-                        <p className="text-xs font-semibold">थकबाकीदार आढळले नाहीत.</p>
+                        <p className="text-xs font-semibold">
+                          {lang === "mr" ? "थकबाकीदार आढळले नाहीत." : "No defaulters found."}
+                        </p>
                       </div>
                     )}
                   </div>
@@ -581,84 +753,168 @@ export default function AdminDashboard() {
               {/* TAB 3: Cash collection */}
               {activeTab === "cash" && (
                 <div className="space-y-6 animate-in fade-in duration-200">
-                  <h3 className="text-xl font-bold text-slate-800">रोख कर भरणा नोंदणी (Cash Collection)</h3>
+                  <h3 className="text-xl font-bold text-slate-800">
+                    {lang === "mr" ? "रोख कर भरणा नोंदणी (Cash Collection)" : "Record Cash Tax Payment"}
+                  </h3>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {/* Left: Input lookup */}
                     <div className="md:col-span-1 bg-white rounded-3xl border border-slate-100 p-6 shadow-sm space-y-4 h-fit">
-                      <h4 className="font-bold text-slate-800 text-sm">खाते शोधा (Lookup Account)</h4>
+                      <h4 className="font-bold text-slate-800 text-sm">
+                        {lang === "mr" ? "खाते शोधा (Lookup Account)" : "Search Account"}
+                      </h4>
                       <div>
-                        <label className="block text-xs font-semibold text-slate-600 mb-1">मालमत्ता क्रमांक (Property No):</label>
+                        <label className="block text-xs font-semibold text-slate-600 mb-1">
+                          {lang === "mr" ? "मालमत्ता क्र. / नाव / मोबाईल:" : "Property No / Name / Mobile:"}
+                        </label>
                         <div className="flex gap-2">
                           <input
                             type="text"
-                            placeholder="उदा. GP-002"
+                            placeholder={lang === "mr" ? "उदा. GP-002, पाटील, 9823..." : "e.g. GP-002, Patil, 9823..."}
                             value={cashPropertyNo}
                             onChange={(e) => setCashPropertyNo(e.target.value)}
-                            className="flex-1 px-3 py-2 text-xs border border-slate-200 rounded-lg uppercase focus:outline-none"
+                            onKeyDown={(e) => { if (e.key === "Enter") handleCashPropertyLookup(); }}
+                            className="flex-1 px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none"
                           />
                           <button
                             type="button"
                             onClick={handleCashPropertyLookup}
                             className="px-3 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg cursor-pointer"
                           >
-                            शोधा
+                            {lang === "mr" ? "शोधा" : "Search"}
                           </button>
                         </div>
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          {lang === "mr" ? "मालमत्ता क्रमांक, धारकाचे नाव किंवा मोबाईल क्रमांक प्रविष्ट करा" : "Enter property number, owner name, or mobile number"}
+                        </p>
                       </div>
 
                       {/* Summary details if found */}
                       {cashSelectedProperty && (
                         <div className="border-t border-slate-100 pt-4 space-y-2 text-xs">
-                          <div className="flex justify-between"><span className="text-slate-400">नाव:</span> <span className="font-bold text-slate-700">{cashSelectedProperty.ownerName}</span></div>
-                          <div className="flex justify-between"><span className="text-slate-400">वॉर्ड:</span> <span className="font-semibold text-slate-700">वॉर्ड {cashSelectedProperty.wardNo}</span></div>
-                          <div className="flex justify-between border-t border-slate-50 pt-2"><span className="text-slate-400">एकूण थकबाकी:</span> <span className="font-extrabold text-orange-600">₹{cashSelectedProperty.totalDue.toFixed(2)}</span></div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">{lang === "mr" ? "मालमत्ता क्र.:" : "Property No:"}</span> 
+                            <span className="font-bold text-slate-700">{cashSelectedProperty.propertyNo}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">{lang === "mr" ? "नाव:" : "Name:"}</span> 
+                            <span className="font-bold text-slate-700">{cashSelectedProperty.ownerName}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">{lang === "mr" ? "वॉर्ड:" : "Ward:"}</span> 
+                            <span className="font-semibold text-slate-700">
+                              {lang === "mr" ? `वॉर्ड ${cashSelectedProperty.wardNo}` : `Ward ${cashSelectedProperty.wardNo}`}
+                            </span>
+                          </div>
+                          <div className="flex justify-between border-t border-slate-50 pt-2">
+                            <span className="text-slate-400">{lang === "mr" ? "घरपट्टी (या वर्षाची):" : "House Tax (This Year):"}</span> 
+                            <span className={`font-semibold ${((cashSelectedProperty as any).yearDues?.find((yd: any) => yd.financialYear === cashFy)?.houseTaxDue || 0) > 0 ? "text-orange-600" : "text-green-600"}`}>
+                              {((cashSelectedProperty as any).yearDues?.find((yd: any) => yd.financialYear === cashFy)?.houseTaxDue || 0) > 0 
+                                ? `₹${((cashSelectedProperty as any).yearDues?.find((yd: any) => yd.financialYear === cashFy)?.houseTaxDue || 0).toFixed(2)}` 
+                                : (lang === "mr" ? "✅ भरले" : "✅ Paid")}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">{lang === "mr" ? "पाणीपट्टी (या वर्षाची):" : "Water Tax (This Year):"}</span> 
+                            <span className={`font-semibold ${((cashSelectedProperty as any).yearDues?.find((yd: any) => yd.financialYear === cashFy)?.waterTaxDue || 0) > 0 ? "text-orange-600" : "text-green-600"}`}>
+                              {((cashSelectedProperty as any).yearDues?.find((yd: any) => yd.financialYear === cashFy)?.waterTaxDue || 0) > 0 
+                                ? `₹${((cashSelectedProperty as any).yearDues?.find((yd: any) => yd.financialYear === cashFy)?.waterTaxDue || 0).toFixed(2)}` 
+                                : (lang === "mr" ? "✅ भरले" : "✅ Paid")}
+                            </span>
+                          </div>
+                          <div className="flex justify-between border-t border-slate-50 pt-2">
+                            <span className="text-slate-400 font-bold">{lang === "mr" ? "या वर्षाची एकूण थकबाकी:" : "Total Dues (This Year):"}</span> 
+                            <span className="font-extrabold text-orange-600">
+                              ₹{(
+                                ((cashSelectedProperty as any).yearDues?.find((yd: any) => yd.financialYear === cashFy)?.houseTaxDue || 0) +
+                                ((cashSelectedProperty as any).yearDues?.find((yd: any) => yd.financialYear === cashFy)?.waterTaxDue || 0)
+                              ).toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between border-t border-slate-50 pt-1">
+                            <span className="text-slate-400 font-bold">{lang === "mr" ? "सर्व वर्षांची एकूण थकबाकी:" : "Total Dues (All Years):"}</span> 
+                            <span className="font-extrabold text-red-600">₹{cashSelectedProperty.totalDue.toFixed(2)}</span>
+                          </div>
                         </div>
                       )}
                     </div>
 
                     {/* Right: Record payment form */}
                     <div className="md:col-span-2 bg-white rounded-3xl border border-slate-100 p-6 shadow-sm">
-                      <h4 className="font-bold text-slate-800 text-sm mb-4">भरणा नोंद (Record Transaction)</h4>
+                      <h4 className="font-bold text-slate-800 text-sm mb-4">
+                        {lang === "mr" ? "भरणा नोंद (Record Transaction)" : "Record Payment Detail"}
+                      </h4>
                       {cashSelectedProperty ? (
                         <form onSubmit={handleCashPaymentSubmit} className="space-y-4">
-                          <div className="grid grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div>
-                              <label className="block text-xs font-semibold text-slate-600 mb-1">कराचा प्रकार (Tax Type):</label>
+                              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                                {lang === "mr" ? "आर्थिक वर्ष (Financial Year):" : "Financial Year:"}
+                              </label>
                               <select
-                                value={cashTaxType}
-                                onChange={(e) => {
-                                  setCashTaxType(e.target.value);
-                                  const currentDue = getTaxDueAmount(cashSelectedProperty, e.target.value);
-                                  setCashAmount(currentDue > 0 ? currentDue.toString() : "");
-                                }}
+                                value={cashFy}
+                                onChange={(e) => setCashFy(e.target.value)}
                                 className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none"
                               >
-                                <option value="house_tax">घरपट्टी (House Tax)</option>
-                                <option value="water_tax">पाणीपट्टी (Water Tax)</option>
-                                <option value="sanitary_tax">सॅनिटरी कर (Sanitary)</option>
-                                <option value="light_tax">दिवाबत्ती कर (Light Tax)</option>
+                                <option value="2025-26">2025-26</option>
+                                <option value="2026-27">2026-27</option>
+                                <option value="2027-28">2027-28</option>
                               </select>
                             </div>
                             <div>
-                              <label className="block text-xs font-semibold text-slate-600 mb-1">रक्कम (Amount Paid - ₹):</label>
+                              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                                {lang === "mr" ? "कराचा प्रकार (Tax Type):" : "Tax Type:"}
+                              </label>
+                              <select
+                                value={cashTaxType}
+                                onChange={(e) => setCashTaxType(e.target.value)}
+                                className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none"
+                              >
+                                {((cashSelectedProperty as any).yearDues?.find((yd: any) => yd.financialYear === cashFy)?.houseTaxDue || 0) > 0 && (
+                                  <option value="house_tax">
+                                    {lang === "mr" 
+                                      ? "घरपट्टी (House Tax) — ₹" + ((cashSelectedProperty as any).yearDues?.find((yd: any) => yd.financialYear === cashFy)?.houseTaxDue || 0).toFixed(2) 
+                                      : "House Tax — ₹" + ((cashSelectedProperty as any).yearDues?.find((yd: any) => yd.financialYear === cashFy)?.houseTaxDue || 0).toFixed(2)}
+                                  </option>
+                                )}
+                                {((cashSelectedProperty as any).yearDues?.find((yd: any) => yd.financialYear === cashFy)?.waterTaxDue || 0) > 0 && (
+                                  <option value="water_tax">
+                                    {lang === "mr" 
+                                      ? "पाणीपट्टी (Water Tax) — ₹" + ((cashSelectedProperty as any).yearDues?.find((yd: any) => yd.financialYear === cashFy)?.waterTaxDue || 0).toFixed(2) 
+                                      : "Water Tax — ₹" + ((cashSelectedProperty as any).yearDues?.find((yd: any) => yd.financialYear === cashFy)?.waterTaxDue || 0).toFixed(2)}
+                                  </option>
+                                )}
+                                {!((cashSelectedProperty as any).yearDues?.find((yd: any) => yd.financialYear === cashFy)?.houseTaxDue > 0) && 
+                                 !((cashSelectedProperty as any).yearDues?.find((yd: any) => yd.financialYear === cashFy)?.waterTaxDue > 0) && (
+                                  <option value="" disabled>{lang === "mr" ? "कोणताही कर शिल्लक नाही" : "No tax pending"}</option>
+                                )}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                                {lang === "mr" ? "रक्कम (Amount - ₹):" : "Amount (₹):"}
+                              </label>
                               <input
                                 type="number"
                                 required
                                 min="1"
-                                placeholder="रक्कम प्रविष्ट करा..."
+                                readOnly
                                 value={cashAmount}
-                                onChange={(e) => setCashAmount(e.target.value)}
-                                className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none"
+                                className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-bold cursor-not-allowed focus:outline-none"
                               />
+                              <p className="text-[10px] text-slate-400 mt-0.5">
+                                {lang === "mr" ? "रक्कम थकबाकीनुसार स्वयं-निर्धारित" : "Amount auto-set from pending dues"}
+                              </p>
                             </div>
                           </div>
 
                           <div>
-                            <label className="block text-xs font-semibold text-slate-600 mb-1">तपशील / नोंद (Notes):</label>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">
+                              {lang === "mr" ? "तपशील / नोंद (Notes):" : "Notes / Remarks:"}
+                            </label>
                             <textarea
                               rows={2}
-                              placeholder="उदा. घरपट्टी रोख भरणा..."
+                              placeholder={lang === "mr" ? "उदा. घरपट्टी रोख भरणा..." : "e.g. House tax cash payment..."}
                               value={cashNotes}
                               onChange={(e) => setCashNotes(e.target.value)}
                               className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none"
@@ -674,21 +930,27 @@ export default function AdminDashboard() {
                               }}
                               className="px-4 py-2 border border-slate-250 hover:bg-slate-50 text-xs font-semibold rounded-lg cursor-pointer"
                             >
-                              रद्द करा
+                              {lang === "mr" ? "रद्द करा" : "Cancel"}
                             </button>
                             <button
                               type="submit"
                               disabled={actionLoading || !cashAmount}
                               className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg disabled:opacity-50 cursor-pointer"
                             >
-                              {actionLoading ? "नोंदवत आहे..." : "भरणा सबमिट करा"}
+                              {actionLoading 
+                                ? (lang === "mr" ? "नोंदवत आहे..." : "Recording...") 
+                                : (lang === "mr" ? "भरणा सबमिट करा" : "Submit Payment")}
                             </button>
                           </div>
                         </form>
                       ) : (
                         <div className="flex flex-col items-center justify-center p-12 text-center text-slate-400">
                           <span className="text-3xl mb-2">🔍</span>
-                          <p className="text-xs font-semibold">भरणा करण्यासाठी प्रथम मालमत्ता क्रमांक शोधून खाते सिलेक्ट करा.</p>
+                          <p className="text-xs font-semibold">
+                            {lang === "mr" 
+                              ? "भरणा करण्यासाठी प्रथम मालमत्ता क्रमांक शोधून खाते सिलेक्ट करा." 
+                              : "Please search and select a property first to record cash payment."}
+                          </p>
                         </div>
                       )}
                     </div>
@@ -700,14 +962,16 @@ export default function AdminDashboard() {
               {activeTab === "properties" && (
                 <div className="space-y-6 animate-in fade-in duration-200">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <h3 className="text-xl font-bold text-slate-800">मालमत्ता व्यवस्थापन (Properties Directory)</h3>
+                    <h3 className="text-xl font-bold text-slate-800">
+                      {lang === "mr" ? "मालमत्ता व्यवस्थापन (Properties)" : "Property Management"}
+                    </h3>
                     
                     <div className="flex items-center gap-2">
                       {/* Search */}
                       <div className="relative w-full sm:w-48">
                         <input
                           type="text"
-                          placeholder="नाव किंवा मालमत्ता क्र..."
+                          placeholder={lang === "mr" ? "नाव किंवा मालमत्ता क्र..." : "Search name or property..."}
                           value={propertySearch}
                           onChange={(e) => setPropertySearch(e.target.value)}
                           className="w-full h-9 pl-3 pr-8 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none"
@@ -719,11 +983,12 @@ export default function AdminDashboard() {
                       <button
                         onClick={() => {
                           setPropFormError("");
+                          setPropFormFy(selectedFy);
                           setIsPropertyModalOpen(true);
                         }}
                         className="h-9 px-3.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-md shrink-0 cursor-pointer"
                       >
-                        ➕ नवीन मालमत्ता
+                        {lang === "mr" ? "➕ नवीन मालमत्ता" : "➕ Add Property"}
                       </button>
                     </div>
                   </div>
@@ -735,12 +1000,12 @@ export default function AdminDashboard() {
                         <table className="w-full text-left text-xs border-collapse">
                           <thead>
                             <tr className="bg-slate-50 border-b border-slate-100 text-slate-400 font-semibold uppercase">
-                              <th className="p-4">मालमत्ता क्र.</th>
-                              <th className="p-4">धारकाचे नाव</th>
-                              <th className="p-4 text-center">प्रभाग</th>
-                              <th className="p-4">मोबाईल</th>
-                              <th className="p-4 text-right">एकूण देय कर</th>
-                              <th className="p-4 text-center">व्यवहार</th>
+                              <th className="p-4">{lang === "mr" ? "मालमत्ता क्र." : "Property No."}</th>
+                              <th className="p-4">{lang === "mr" ? "धारकाचे नाव" : "Owner Name"}</th>
+                              <th className="p-4 text-center">{lang === "mr" ? "प्रभाग" : "Ward"}</th>
+                              <th className="p-4">{lang === "mr" ? "मोबाईल" : "Mobile"}</th>
+                              <th className="p-4 text-right">{lang === "mr" ? "एकूण देय कर" : "Total Dues"}</th>
+                              <th className="p-4 text-center">{lang === "mr" ? "व्यवहार" : "Txns"}</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50">
@@ -749,7 +1014,9 @@ export default function AdminDashboard() {
                                 <td className="p-4 font-mono font-bold text-slate-800">{p.propertyNo}</td>
                                 <td className="p-4 font-bold text-slate-700">{p.ownerName}</td>
                                 <td className="p-4 text-center">
-                                  <span className="bg-orange-50 text-orange-655 px-2 py-0.5 rounded text-[10px] font-bold">वॉर्ड {p.wardNo}</span>
+                                  <span className="bg-orange-50 text-orange-655 px-2 py-0.5 rounded text-[10px] font-bold">
+                                    {lang === "mr" ? `वॉर्ड ${p.wardNo}` : `Ward ${p.wardNo}`}
+                                  </span>
                                 </td>
                                 <td className="p-4 text-slate-600">{p.mobileNumber}</td>
                                 <td className="p-4 text-right font-extrabold text-slate-800">₹{p.totalDue.toFixed(2)}</td>
@@ -761,7 +1028,9 @@ export default function AdminDashboard() {
                       </div>
                     ) : (
                       <div className="p-12 text-center text-slate-400">
-                        <p className="text-xs font-semibold">कोणतीही मालमत्ता सापडली नाही.</p>
+                        <p className="text-xs font-semibold">
+                          {lang === "mr" ? "कोणतीही मालमत्ता सापडली नाही." : "No properties found."}
+                        </p>
                       </div>
                     )}
                   </div>
@@ -771,16 +1040,22 @@ export default function AdminDashboard() {
               {/* TAB 5: Bulk Import csv */}
               {activeTab === "import" && (
                 <div className="space-y-6 animate-in fade-in duration-200">
-                  <h3 className="text-xl font-bold text-slate-800">डेटा आयात (Bulk CSV Import)</h3>
+                  <h3 className="text-xl font-bold text-slate-800">
+                    {lang === "mr" ? "डेटा आयात (Bulk CSV Import)" : "Bulk CSV Import"}
+                  </h3>
 
                   <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm space-y-6">
                     <div className="space-y-2">
-                      <h4 className="font-bold text-slate-800 text-sm">पारंपारिक रेकॉर्ड्स आयात करा</h4>
+                      <h4 className="font-bold text-slate-800 text-sm">
+                        {lang === "mr" ? "पारंपारिक रेकॉर्ड्स आयात करा" : "Import Historical Records"}
+                      </h4>
                       <p className="text-slate-500 text-xs leading-relaxed max-w-2xl">
-                        आपल्याकडील सर्व ५४४ मालमत्तांचे रेकॉर्ड्स एकाच वेळी आयात करण्यासाठी CSV फाइल निवडा. फाइलमध्ये खालील हेडर कॉलम्स असणे अनिवार्य आहे:
+                        {lang === "mr" 
+                          ? "आपल्याकडील सर्व ५४४ मालमत्तांचे रेकॉर्ड्स एकाच वेळी आयात करण्यासाठी CSV फाइल निवडा. फाइलमध्ये खालील हेडर कॉलम्स असणे अनिवार्य आहे:" 
+                          : "Select a CSV file to import all 544 property records at once. The CSV file must contain the following headers:"}
                       </p>
                       <code className="block bg-slate-50 border border-slate-100 p-3 rounded-lg text-[10px] font-mono text-slate-600">
-                        propertyNo,ownerName,ownerNameEn,mobileNumber,wardNo,address,houseTaxDue,waterTaxDue,sanitaryTaxDue,lightTaxDue
+                        propertyNo,financialYear,ownerName,ownerNameEn,mobileNumber,wardNo,address,houseTaxDue,waterTaxDue
                       </code>
                     </div>
 
@@ -792,21 +1067,31 @@ export default function AdminDashboard() {
                         className="absolute inset-0 opacity-0 cursor-pointer"
                       />
                       <span className="text-3xl mb-2">📊</span>
-                      <span className="text-xs font-semibold text-slate-700">CSV फाइल निवडा किंवा ड्रॅग करा</span>
-                      <span className="text-[10px] text-slate-400 mt-1">फक्त .csv फाइल्स</span>
+                      <span className="text-xs font-semibold text-slate-700">
+                        {lang === "mr" ? "CSV फाइल निवडा किंवा ड्रॅग करा" : "Select or Drag CSV File"}
+                      </span>
+                      <span className="text-[10px] text-slate-400 mt-1">
+                        {lang === "mr" ? "फक्त .csv फाइल्स" : "Only .csv files"}
+                      </span>
                     </div>
 
                     {csvFileContent && (
                       <div className="space-y-4">
                         <div className="flex items-center gap-3">
-                          <span className="text-xs text-slate-500">फाइल तयार आहे!</span>
+                          <span className="text-xs text-slate-500">
+                            {lang === "mr" ? "फाइल तयार आहे!" : "File ready!"}
+                          </span>
                           <button
                             type="button"
                             onClick={handleStartImport}
                             disabled={importStatus === "IMPORTING" || importStatus === "PARSING"}
                             className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg disabled:opacity-50 cursor-pointer"
                           >
-                            {importStatus === "IMPORTING" ? `आयात होत आहे (${importProgress.current}/${importProgress.total})...` : "डेटा आयात सुरू करा"}
+                            {importStatus === "IMPORTING" 
+                              ? (lang === "mr" 
+                                  ? `आयात होत आहे (${importProgress.current}/${importProgress.total})...` 
+                                  : `Importing (${importProgress.current}/${importProgress.total})...`) 
+                              : (lang === "mr" ? "डेटा आयात सुरू करा" : "Start Import")}
                           </button>
                         </div>
 
@@ -833,6 +1118,110 @@ export default function AdminDashboard() {
                   </div>
                 </div>
               )}
+
+              {/* TAB 6: Yearly Assessment & Rollover */}
+              {activeTab === "assess" && (
+                <div className="space-y-6 animate-in fade-in duration-200">
+                  <h3 className="text-xl font-bold text-slate-800">
+                    {lang === "mr" ? "वार्षिक कर आकारणी व रोलओव्हर (Rollover)" : "Yearly Tax Assessment & Rollover"}
+                  </h3>
+
+                  <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm space-y-6">
+                    <div className="space-y-2">
+                      <h4 className="font-bold text-slate-800 text-sm">
+                        {lang === "mr" ? "नवीन आर्थिक वर्षाची आकारणी करा" : "Assess New Financial Year"}
+                      </h4>
+                      <p className="text-slate-500 text-xs leading-relaxed max-w-2xl">
+                        {lang === "mr" 
+                          ? "या पर्यायाद्वारे तुम्ही संपूर्ण गाव किंवा विशिष्ट मालमत्तेसाठी नवीन आर्थिक वर्षाचे कर आकारू शकता. कर आकारणी करताना मागील वर्षाच्या मूल्याचा आधार घेऊन नवीन येणे रक्कम जोडली जाईल व एकूण थकबाकीत वाढ केली जाईल." 
+                          : "This utility rolls over active properties into a new financial year. It baseline-copies the previous year's assessed taxes, adds them as current outstanding year dues, and increases the aggregate outstanding dues on the property records."}
+                      </p>
+                    </div>
+
+                    {assessSuccessMsg && (
+                      <div className="p-4 bg-green-50 border border-green-200/50 rounded-2xl text-xs text-green-700">
+                        <strong>✅ {lang === "mr" ? "यशस्वी!" : "Success!"}</strong> {assessSuccessMsg}
+                      </div>
+                    )}
+
+                    {assessErrorMsg && (
+                      <div className="p-4 bg-red-50 border border-red-200/50 rounded-2xl text-xs text-red-700">
+                        <strong>⚠️ {lang === "mr" ? "त्रुटी!" : "Error!"}</strong> {assessErrorMsg}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-md">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                          {lang === "mr" ? "लक्ष्य आर्थिक वर्ष (Target FY) *" : "Target Financial Year *"}
+                        </label>
+                        <select
+                          value={assessFy}
+                          onChange={(e) => setAssessFy(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 text-xs text-slate-700 font-semibold focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                        >
+                          <option value="2026-27">2026-27</option>
+                          <option value="2027-28">2027-28</option>
+                          <option value="2028-29">2028-29</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                          {lang === "mr" ? "विशिष्ट मालमत्ता क्रमांक (पर्यायी)" : "Specific Property No (Optional)"}
+                        </label>
+                        <input
+                          type="text"
+                          value={assessPropertyNo}
+                          onChange={(e) => setAssessPropertyNo(e.target.value)}
+                          placeholder="उदा. GP-001"
+                          className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 text-xs text-slate-700 font-mono placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setActionLoading(true);
+                          setAssessSuccessMsg("");
+                          setAssessErrorMsg("");
+                          try {
+                            const res = await fetch("/api/admin/assess", {
+                              method: "POST",
+                              headers: {
+                                "Content-Type": "application/json",
+                                "x-admin-key": ADMIN_KEY
+                              },
+                              body: JSON.stringify({
+                                targetFy: assessFy,
+                                propertyNo: assessPropertyNo || undefined
+                              })
+                            });
+                            const resJson = await res.json();
+                            if (resJson.success) {
+                              setAssessSuccessMsg(resJson.message);
+                              setAssessPropertyNo("");
+                              loadDashboardData();
+                            } else {
+                              setAssessErrorMsg(resJson.message);
+                            }
+                          } catch (err: any) {
+                            setAssessErrorMsg(lang === "mr" ? "आकारणी करताना तांत्रिक अडचण आली." : "Technical error during assessment rollover.");
+                          } finally {
+                            setActionLoading(false);
+                          }
+                        }}
+                        disabled={actionLoading}
+                        className="px-6 py-3 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-bold shadow-md shadow-orange-500/10 transition-colors disabled:opacity-50 cursor-pointer"
+                      >
+                        {actionLoading ? (lang === "mr" ? "आकारणी सुरू आहे..." : "Processing...") : (lang === "mr" ? "आकारणी लागू करा" : "Apply Assessment")}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </main>
@@ -856,7 +1245,9 @@ export default function AdminDashboard() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
           <div className="relative w-full max-w-lg bg-white rounded-2xl border border-slate-100 shadow-2xl overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200">
             <div className="bg-slate-900 text-white px-5 py-4 flex items-center justify-between">
-              <h3 className="font-bold text-sm">नवीन मालमत्ता नोंदणी (Add Property)</h3>
+              <h3 className="font-bold text-sm">
+                {lang === "mr" ? "नवीन मालमत्ता नोंदणी (Add Property)" : "Add New Property"}
+              </h3>
               <button onClick={() => setIsPropertyModalOpen(false)} className="text-white/80 hover:text-white">
                 ✕
               </button>
@@ -865,22 +1256,26 @@ export default function AdminDashboard() {
             <form onSubmit={handleAddPropertySubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">मालमत्ता क्रमांक *</label>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                    {lang === "mr" ? "मालमत्ता क्रमांक *" : "Property Number *"}
+                  </label>
                   <input
                     type="text"
                     required
-                    placeholder="उदा. GP-031"
+                    placeholder={lang === "mr" ? "उदा. GP-031" : "e.g. GP-031"}
                     value={propFormNo}
                     onChange={(e) => setPropFormNo(e.target.value)}
                     className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">मोबाईल क्रमांक *</label>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                    {lang === "mr" ? "मोबाईल क्रमांक *" : "Mobile Number *"}
+                  </label>
                   <input
                     type="text"
                     required
-                    placeholder="उदा. 9823xxxxxx"
+                    placeholder={lang === "mr" ? "उदा. 9823xxxxxx" : "e.g. 9823xxxxxx"}
                     value={propFormMobile}
                     onChange={(e) => setPropFormMobile(e.target.value)}
                     className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none"
@@ -889,47 +1284,70 @@ export default function AdminDashboard() {
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">धारकाचे नाव (मराठी) *</label>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                  {lang === "mr" ? "धारकाचे नाव (मराठी) *" : "Owner Name (Marathi) *"}
+                </label>
                 <input
                   type="text"
                   required
-                  placeholder="उदा. श्री. रामचंद्र पाटील"
+                  placeholder={lang === "mr" ? "उदा. श्री. रामचंद्र पाटील" : "e.g. Shri. Ramchandra Patil"}
                   value={propFormName}
                   onChange={(e) => setPropFormName(e.target.value)}
                   className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none"
                 />
               </div>
 
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                  {lang === "mr" ? "धारकाचे नाव (इंग्रजी)" : "Owner Name (English)"}
+                </label>
+                <input
+                  type="text"
+                  placeholder="Shri. Ramchandra Patil"
+                  value={propFormNameEn}
+                  onChange={(e) => setPropFormNameEn(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none"
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Owner Name (English)</label>
-                  <input
-                    type="text"
-                    placeholder="Shri. Ramchandra Patil"
-                    value={propFormNameEn}
-                    onChange={(e) => setPropFormNameEn(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">प्रभाग क्रमांक *</label>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                    {lang === "mr" ? "प्रभाग क्रमांक *" : "Ward Number *"}
+                  </label>
                   <select
                     value={propFormWard}
                     onChange={(e) => setPropFormWard(e.target.value)}
                     className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none"
                   >
-                    <option value="1">प्रभाग १ (Ward 1)</option>
-                    <option value="2">प्रभाग २ (Ward 2)</option>
-                    <option value="3">प्रभाग ३ (Ward 3)</option>
+                    <option value="1">{lang === "mr" ? "प्रभाग १ (Ward 1)" : "Ward 1"}</option>
+                    <option value="2">{lang === "mr" ? "प्रभाग २ (Ward 2)" : "Ward 2"}</option>
+                    <option value="3">{lang === "mr" ? "प्रभाग ३ (Ward 3)" : "Ward 3"}</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                    {lang === "mr" ? "आर्थिक वर्ष (Financial Year) *" : "Financial Year *"}
+                  </label>
+                  <select
+                    value={propFormFy}
+                    onChange={(e) => setPropFormFy(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none"
+                  >
+                    <option value="2025-26">2025-26</option>
+                    <option value="2026-27">2026-27</option>
+                    <option value="2027-28">2027-28</option>
                   </select>
                 </div>
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">पत्ता (Address)</label>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                  {lang === "mr" ? "पत्ता (Address)" : "Address"}
+                </label>
                 <input
                   type="text"
-                  placeholder="उदा. बाजारपेठ जवळ..."
+                  placeholder={lang === "mr" ? "उदा. बाजारपेठ जवळ..." : "e.g. Near market..."}
                   value={propFormAddress}
                   onChange={(e) => setPropFormAddress(e.target.value)}
                   className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none"
@@ -937,10 +1355,14 @@ export default function AdminDashboard() {
               </div>
 
               <div className="border-t border-slate-100 pt-3">
-                <span className="block text-xs font-bold text-slate-700 mb-2">थकबाकी आरंभिक मूल्य (Initial Dues)</span>
+                <span className="block text-xs font-bold text-slate-700 mb-2">
+                  {lang === "mr" ? "थकबाकी आरंभिक मूल्य (Initial Dues)" : "Initial Dues"}
+                </span>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[9px] font-semibold text-slate-500 mb-1">घरपट्टी थकबाकी (₹)</label>
+                    <label className="block text-[9px] font-semibold text-slate-500 mb-1">
+                      {lang === "mr" ? "घरपट्टी थकबाकी (₹)" : "House Tax Dues (₹)"}
+                    </label>
                     <input
                       type="number"
                       value={propFormHouse}
@@ -949,7 +1371,9 @@ export default function AdminDashboard() {
                     />
                   </div>
                   <div>
-                    <label className="block text-[9px] font-semibold text-slate-500 mb-1">पाणीपट्टी थकबाकी (₹)</label>
+                    <label className="block text-[9px] font-semibold text-slate-500 mb-1">
+                      {lang === "mr" ? "पाणीपट्टी थकबाकी (₹)" : "Water Tax Dues (₹)"}
+                    </label>
                     <input
                       type="number"
                       value={propFormWater}
@@ -957,29 +1381,14 @@ export default function AdminDashboard() {
                       className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none"
                     />
                   </div>
-                  <div>
-                    <label className="block text-[9px] font-semibold text-slate-500 mb-1">सॅनिटरी थकबाकी (₹)</label>
-                    <input
-                      type="number"
-                      value={propFormSanitary}
-                      onChange={(e) => setPropFormSanitary(e.target.value)}
-                      className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[9px] font-semibold text-slate-500 mb-1">दिवाबत्ती थकबाकी (₹)</label>
-                    <input
-                      type="number"
-                      value={propFormLight}
-                      onChange={(e) => setPropFormLight(e.target.value)}
-                      className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none"
-                    />
-                  </div>
                 </div>
               </div>
 
               {propFormError && (
-                <p className="text-[11px] text-red-500 text-center">⚠️ {propFormError}</p>
+                <div className="bg-red-50 border border-red-200 rounded-xl p-3 flex items-start gap-2">
+                  <span className="text-red-500 text-sm mt-0.5">⚠️</span>
+                  <p className="text-xs text-red-700 font-semibold">{propFormError}</p>
+                </div>
               )}
 
               <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
@@ -988,14 +1397,16 @@ export default function AdminDashboard() {
                   onClick={() => setIsPropertyModalOpen(false)}
                   className="px-4 py-2 border border-slate-200 text-xs font-semibold rounded-lg cursor-pointer"
                 >
-                  रद्द करा
+                  {lang === "mr" ? "रद्द करा" : "Cancel"}
                 </button>
                 <button
                   type="submit"
                   disabled={actionLoading}
                   className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg disabled:opacity-50 cursor-pointer"
                 >
-                  {actionLoading ? "नोंदणी होत आहे..." : "मालमत्ता सबमिट करा"}
+                  {actionLoading 
+                    ? (lang === "mr" ? "नोंदणी होत आहे..." : "Registering...") 
+                    : (lang === "mr" ? "मालमत्ता सबमिट करा" : "Submit Property")}
                 </button>
               </div>
             </form>
@@ -1037,16 +1448,25 @@ function SidebarBtn({
 function StatsCard({
   label,
   val,
-  color
+  borderColor,
+  bgColor,
+  textColor,
+  icon
 }: {
   label: string;
   val: string;
-  color: string;
+  borderColor: string;
+  bgColor: string;
+  textColor: string;
+  icon: string;
 }) {
   return (
-    <div className={`p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-between ${color}`}>
-      <span className="text-[10px] font-bold opacity-80 uppercase tracking-wide">{label}</span>
-      <span className="text-xl font-extrabold mt-2 tracking-tight">{val}</span>
+    <div className={`p-4 rounded-3xl shadow-sm border-l-4 ${borderColor} ${bgColor} flex flex-col justify-between transition-all duration-300 hover:shadow-md border border-slate-100`}>
+      <div className="flex justify-between items-start gap-2">
+        <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">{label}</span>
+        <span className="text-sm shrink-0">{icon}</span>
+      </div>
+      <span className={`text-lg md:text-xl font-extrabold mt-3 tracking-tight ${textColor}`}>{val}</span>
     </div>
   );
 }
