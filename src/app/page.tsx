@@ -118,7 +118,7 @@ export default function HomePage() {
             <h2 className="text-3xl md:text-5xl font-extrabold tracking-tight mb-4 bg-gradient-to-r from-white via-slate-100 to-orange-100 bg-clip-text text-transparent">
               {t("searchTitle")}
             </h2>
-            <p className="text-slate-350 text-sm md:text-base max-w-xl mx-auto mb-8 leading-relaxed">
+            <p className="text-slate-300 text-sm md:text-base max-w-xl mx-auto mb-8 leading-relaxed">
               {t("searchSubtitle")}
             </p>
 
@@ -151,7 +151,7 @@ export default function HomePage() {
             </form>
 
             {/* Quick Helper Tips */}
-            <div className="mt-4 text-xs text-slate-350 flex justify-center gap-6">
+            <div className="mt-4 text-xs text-slate-300 flex justify-center gap-6">
               <span>{t("searchHelper")}</span>
               <span>•</span>
               <span>✍️ {t("searchHelperName")}</span>

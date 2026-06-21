@@ -15,15 +15,18 @@ import { runWithFallback, mockDb } from '@/lib/dbFallback'
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const ward = searchParams.get('ward')
-    const year = searchParams.get('year') || getCurrentFinancialYear()
+    const wardParam = searchParams.get('ward')
+    const yearParam = searchParams.get('year')
+
+    const years = yearParam ? yearParam.split(',').map(y => y.trim()).filter(Boolean) : [getCurrentFinancialYear()]
+    const wards = wardParam && wardParam !== 'all' ? wardParam.split(',').map(w => parseInt(w.trim(), 10)).filter(w => !isNaN(w)) : []
 
     const prismaQuery = async () => {
       // Build property filter
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const propertyWhere: any = { isActive: true, financialYear: year }
-      if (ward && ward !== 'all' && ['1', '2', '3'].includes(ward)) {
-        propertyWhere.wardNo = parseInt(ward, 10)
+      const propertyWhere: any = { isActive: true, financialYear: { in: years } }
+      if (wards.length > 0) {
+        propertyWhere.wardNo = { in: wards }
       }
 
       // ---- Property & Tax Summary ----
@@ -44,6 +47,45 @@ export async function GET(request: NextRequest) {
       let totalHouseTaxDue = 0
       let totalWaterTaxDue = 0
       let defaulterCount = 0
+
+      // Group by propertyNo to calculate unique defaulters
+      const propertyMap = new Map<string, {
+        propertyNo: string
+        ownerName: string
+        ownerNameEn: string | null
+        wardNo: number
+        mobileNumber: string
+        houseTaxDue: number
+        waterTaxDue: number
+        totalDue: number
+      }>()
+
+      for (const p of properties) {
+        const houseTax = Number(p.houseTaxDue)
+        const waterTax = Number(p.waterTaxDue)
+
+        totalHouseTaxDue += houseTax
+        totalWaterTaxDue += waterTax
+
+        const existing = propertyMap.get(p.propertyNo)
+        if (existing) {
+          existing.houseTaxDue += houseTax
+          existing.waterTaxDue += waterTax
+          existing.totalDue += (houseTax + waterTax)
+        } else {
+          propertyMap.set(p.propertyNo, {
+            propertyNo: p.propertyNo,
+            ownerName: p.ownerName,
+            ownerNameEn: p.ownerNameEn,
+            wardNo: p.wardNo,
+            mobileNumber: p.mobileNumber,
+            houseTaxDue: houseTax,
+            waterTaxDue: waterTax,
+            totalDue: houseTax + waterTax,
+          })
+        }
+      }
+
       const defaulters: Array<{
         propertyNo: string
         ownerName: string
@@ -53,15 +95,8 @@ export async function GET(request: NextRequest) {
         totalDue: number
       }> = []
 
-      for (const p of properties) {
-        const houseTax = Number(p.houseTaxDue)
-        const waterTax = Number(p.waterTaxDue)
-        const totalDue = houseTax + waterTax
-
-        totalHouseTaxDue += houseTax
-        totalWaterTaxDue += waterTax
-
-        if (totalDue > 0) {
+      for (const p of propertyMap.values()) {
+        if (p.totalDue > 0) {
           defaulterCount++
           defaulters.push({
             propertyNo: p.propertyNo,
@@ -69,7 +104,7 @@ export async function GET(request: NextRequest) {
             ownerNameEn: p.ownerNameEn,
             wardNo: p.wardNo,
             mobileNumber: p.mobileNumber,
-            totalDue,
+            totalDue: p.totalDue,
           })
         }
       }
@@ -77,16 +112,20 @@ export async function GET(request: NextRequest) {
       // Sort defaulters by highest dues
       defaulters.sort((a, b) => b.totalDue - a.totalDue)
 
-      // ---- Transaction Summary (collections for the year) ----
+      // ---- Transaction Summary (collections for the years) ----
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const txnWhere: any = {
-        financialYear: year,
+        financialYear: { in: years },
         status: 'SUCCESS',
       }
 
       // If ward filter, need to join through property
-      if (ward && ward !== 'all' && ['1', '2', '3'].includes(ward)) {
-        txnWhere.property = { wardNo: parseInt(ward, 10), financialYear: year }
+      if (wards.length > 0) {
+        txnWhere.property = { 
+          wardNo: { in: wards },
+          financialYear: { in: years },
+          isActive: true
+        }
       }
 
       const transactions = await prisma.transaction.findMany({
@@ -132,7 +171,7 @@ export async function GET(request: NextRequest) {
       }
 
       // ---- Ward-wise Breakdown ----
-      const wardStats = await getWardWiseStats(year)
+      const wardStats = await getWardWiseStats(years)
 
       // ---- Total Expected (dues + already collected) ----
       const totalExpected =
@@ -143,9 +182,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         success: true,
         data: {
-          financialYear: year,
+          financialYear: yearParam || getCurrentFinancialYear(),
           overview: {
-            totalProperties: properties.length,
+            totalProperties: propertyMap.size,
             totalExpected: Math.round(totalExpected * 100) / 100,
             totalCollected: Math.round(totalCollected * 100) / 100,
             totalPending:
@@ -175,7 +214,7 @@ export async function GET(request: NextRequest) {
           },
           defaulters: {
             count: defaulterCount,
-            paidUpCount: properties.length - defaulterCount,
+            paidUpCount: propertyMap.size - defaulterCount,
             list: defaulters.slice(0, 50),
           },
           wardStats,
@@ -184,7 +223,7 @@ export async function GET(request: NextRequest) {
     }
 
     const fallbackQuery = () => {
-      const stats = mockDb.getAdminStats(ward || undefined, year)
+      const stats = mockDb.getAdminStats(wardParam || undefined, yearParam || undefined)
       return NextResponse.json({
         success: true,
         data: stats,
@@ -204,19 +243,22 @@ export async function GET(request: NextRequest) {
 /**
  * Get ward-wise statistics for all 3 wards
  */
-async function getWardWiseStats(year: string) {
+async function getWardWiseStats(years: string[]) {
   const wards = [1, 2, 3]
   const stats = []
 
   for (const wardNo of wards) {
     const properties = await prisma.property.findMany({
-      where: { wardNo, isActive: true, financialYear: year },
+      where: { wardNo, isActive: true, financialYear: { in: years } },
       select: {
+        propertyNo: true,
         houseTaxDue: true,
         waterTaxDue: true,
       },
     })
 
+    // Group properties by propertyNo to count unique properties
+    const propertyMap = new Map<string, number>()
     let totalDue = 0
     let propertiesWithDues = 0
 
@@ -225,14 +267,20 @@ async function getWardWiseStats(year: string) {
         Number(p.houseTaxDue) +
         Number(p.waterTaxDue)
       totalDue += due
-      if (due > 0) propertiesWithDues++
+      propertyMap.set(p.propertyNo, (propertyMap.get(p.propertyNo) || 0) + due)
+    }
+
+    for (const due of propertyMap.values()) {
+      if (due > 0) {
+        propertiesWithDues++
+      }
     }
 
     const transactions = await prisma.transaction.findMany({
       where: {
-        property: { wardNo, financialYear: year },
+        property: { wardNo, financialYear: { in: years }, isActive: true },
         status: 'SUCCESS',
-        financialYear: year,
+        financialYear: { in: years },
       },
       select: { amountPaid: true },
     })
@@ -241,9 +289,9 @@ async function getWardWiseStats(year: string) {
 
     stats.push({
       wardNo,
-      totalProperties: properties.length,
+      totalProperties: propertyMap.size,
       propertiesWithDues,
-      paidUpProperties: properties.length - propertiesWithDues,
+      paidUpProperties: propertyMap.size - propertiesWithDues,
       totalDue: Math.round(totalDue * 100) / 100,
       totalCollected: Math.round(totalCollected * 100) / 100,
     })

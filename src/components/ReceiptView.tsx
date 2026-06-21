@@ -230,7 +230,7 @@ export default function ReceiptView({ isOpen, onClose, transaction, propertyData
           </span>
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-slate-200 hover:bg-slate-350 text-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+            className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
           >
             बंद करा (Close)
           </button>

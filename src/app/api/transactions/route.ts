@@ -19,7 +19,9 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const propertyNo = searchParams.get('propertyNo')
     const year = searchParams.get('year')
+    const ward = searchParams.get('ward')
     const status = searchParams.get('status')
+    const date = searchParams.get('date')
     const page = parseInt(searchParams.get('page') || '1', 10)
     const limit = parseInt(searchParams.get('limit') || '20', 10)
     const skip = (page - 1) * limit
@@ -33,11 +35,33 @@ export async function GET(request: NextRequest) {
     }
 
     if (year) {
-      where.financialYear = year
+      const years = year.split(',').map(y => y.trim()).filter(Boolean)
+      if (years.length > 0) {
+        where.financialYear = { in: years }
+      }
+    }
+
+    if (ward) {
+      const wards = ward.split(',').map(w => parseInt(w.trim(), 10)).filter(w => !isNaN(w))
+      if (wards.length > 0) {
+        where.property = {
+          wardNo: { in: wards }
+        }
+      }
     }
 
     if (status) {
       where.status = status.toUpperCase()
+    }
+
+    if (date) {
+      const start = new Date(date)
+      const end = new Date(date)
+      end.setDate(end.getDate() + 1)
+      where.paymentDate = {
+        gte: start,
+        lt: end
+      }
     }
 
     const [transactions, total] = await runWithFallback(
@@ -65,16 +89,40 @@ export async function GET(request: NextRequest) {
           list = list.filter(t => t.propertyNo.toUpperCase() === propertyNo.toUpperCase());
         }
         if (year) {
-          list = list.filter(t => t.financialYear === year);
+          const years = year.split(',').map(y => y.trim()).filter(Boolean);
+          if (years.length > 0) {
+            list = list.filter(t => years.includes(t.financialYear));
+          }
+        }
+        if (ward) {
+          const wards = ward.split(',').map(w => parseInt(w.trim(), 10)).filter(w => !isNaN(w));
+          if (wards.length > 0) {
+            list = list.filter(t => {
+              const prop = mockDb.properties.find(
+                p => p.propertyNo.toUpperCase() === t.propertyNo.toUpperCase() && p.financialYear === t.financialYear
+              );
+              return prop ? wards.includes(prop.wardNo) : false;
+            });
+          }
         }
         if (status) {
           list = list.filter(t => t.status === status.toUpperCase());
+        }
+        if (date) {
+          list = list.filter(t => {
+            const yr = t.paymentDate.getFullYear();
+            const mo = String(t.paymentDate.getMonth() + 1).padStart(2, '0');
+            const dy = String(t.paymentDate.getDate()).padStart(2, '0');
+            return `${yr}-${mo}-${dy}` === date;
+          });
         }
         list.sort((a, b) => b.paymentDate.getTime() - a.paymentDate.getTime());
         
         const total = list.length;
         const pageList = list.slice(skip, skip + limit).map(t => {
-          const prop = mockDb.properties.find(p => p.propertyNo === t.propertyNo);
+          const prop = mockDb.properties.find(
+            p => p.propertyNo.toUpperCase() === t.propertyNo.toUpperCase() && p.financialYear === t.financialYear
+          );
           return {
             ...t,
             property: {

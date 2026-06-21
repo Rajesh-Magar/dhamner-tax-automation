@@ -42,6 +42,15 @@ export async function GET(
       )
     }
 
+    // Fetch communication logs
+    const commLogs = await runWithFallback(
+      () => (prisma as any).communicationLog.findMany({
+        where: { propertyNo: propertyNo.toUpperCase() },
+        orderBy: { sentAt: 'desc' },
+      }),
+      () => mockDb.getCommunicationLogs(propertyNo)
+    )
+
     // Sort descending by financial year
     properties.sort((a: any, b: any) => b.financialYear.localeCompare(a.financialYear))
     const latestProperty = properties[0]
@@ -87,6 +96,7 @@ export async function GET(
           amountPaid: Number(t.amountPaid),
         })),
         yearDues,
+        communicationLogs: commLogs || [],
       },
     })
   } catch (error) {

@@ -51,3 +51,15 @@ model Transaction {
 
   @@map("transactions")
 }
+
+model CommunicationLog {
+  id            Int      @id @default(autoincrement())
+  propertyNo    String   @map("property_no")
+  type          String   // WHATSAPP, SMS, PRINT
+  recipient     String   // Owner name or phone number
+  message       String
+  sentBy        String   @default("ग्रामसेवक") @map("sent_by")
+  sentAt        DateTime @default(now()) @map("sent_at")
+
+  @@map("communication_logs")
+}

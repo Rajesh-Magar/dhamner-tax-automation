@@ -74,11 +74,23 @@ export interface MockTransaction {
   createdAt: Date;
 }
 
+export interface MockCommunicationLog {
+  id: number;
+  propertyNo: string;
+  type: string;
+  recipient: string;
+  message: string;
+  sentBy: string;
+  sentAt: Date;
+}
+
 class MockDatabase {
   properties: MockProperty[] = [];
   transactions: MockTransaction[] = [];
+  communicationLogs: MockCommunicationLog[] = [];
   private propIdCounter = 1;
   private txnIdCounter = 21;
+  private logIdCounter = 1;
 
   constructor() {
     this.seed();
@@ -236,6 +248,37 @@ class MockDatabase {
         updatedAt: new Date('2026-04-01T00:00:00Z')
       });
     });
+
+    // Seed communication logs
+    this.communicationLogs = [
+      {
+        id: this.logIdCounter++,
+        propertyNo: 'GP-002',
+        type: 'WHATSAPP',
+        recipient: 'श्रीमती. सुनीता देशमुख (8976543210)',
+        message: 'प्रिय श्रीमती. सुनीता देशमुख, आपल्या मालमत्ता GP-002 ची एकूण थकबाकी ₹2300 आहे. कृपया लवकरात लवकर भरणा करावा - ग्रामपंचायत धामणे.',
+        sentBy: 'ग्रामसेवक',
+        sentAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
+      },
+      {
+        id: this.logIdCounter++,
+        propertyNo: 'GP-003',
+        type: 'SMS',
+        recipient: 'श्री. विकास जाधव (7738291045)',
+        message: 'SMS रिमाइंडर्स: मालमत्ता क्र. GP-003 कर थकबाकी ₹3700. त्वरित भरणा करा.',
+        sentBy: 'System',
+        sentAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000)
+      },
+      {
+        id: this.logIdCounter++,
+        propertyNo: 'GP-006',
+        type: 'PRINT',
+        recipient: 'श्री. सुरेश गायकवाड',
+        message: 'कराची मागणी नोटीस प्रिंट केली (एकूण थकबाकी ₹4500)',
+        sentBy: 'ग्रामसेवक',
+        sentAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000)
+      }
+    ];
   }
 
   // --- QUERY IMPLEMENTATIONS ---
@@ -244,11 +287,17 @@ class MockDatabase {
     let list = this.properties.filter(p => p.isActive);
 
     if (financialYear && financialYear !== 'all') {
-      list = list.filter(p => p.financialYear === financialYear);
+      const years = financialYear.split(',').map(y => y.trim()).filter(Boolean);
+      if (years.length > 0) {
+        list = list.filter(p => years.includes(p.financialYear));
+      }
     }
 
-    if (ward && ['1', '2', '3'].includes(ward)) {
-      list = list.filter(p => p.wardNo === parseInt(ward, 10));
+    if (ward && ward !== 'all') {
+      const wards = ward.split(',').map(w => parseInt(w.trim(), 10)).filter(w => !isNaN(w));
+      if (wards.length > 0) {
+        list = list.filter(p => wards.includes(p.wardNo));
+      }
     }
 
     if (search) {
@@ -325,19 +374,61 @@ class MockDatabase {
   }
 
   getAdminStats(ward?: string, year = '2025-26') {
-    const activeProps = this.properties.filter(p => p.isActive && p.financialYear === year && (ward && ward !== 'all' ? p.wardNo === parseInt(ward, 10) : true));
+    const years = year.split(',').map(y => y.trim()).filter(Boolean);
+    const wards = ward && ward !== 'all' ? ward.split(',').map(w => parseInt(w.trim(), 10)).filter(w => !isNaN(w)) : [];
+
+    const activeProps = this.properties.filter(p => 
+      p.isActive && 
+      years.includes(p.financialYear) && 
+      (wards.length > 0 ? wards.includes(p.wardNo) : true)
+    );
     
     let totalHouseTaxDue = 0;
     let totalWaterTaxDue = 0;
+
+    // Group properties by propertyNo to aggregate dues
+    const propertyMap = new Map<string, {
+      propertyNo: string;
+      ownerName: string;
+      ownerNameEn: string | null;
+      wardNo: number;
+      mobileNumber: string;
+      houseTaxDue: number;
+      waterTaxDue: number;
+      totalDue: number;
+    }>();
+
+    activeProps.forEach(p => {
+      const houseTax = p.houseTaxDue;
+      const waterTax = p.waterTaxDue;
+      
+      totalHouseTaxDue += houseTax;
+      totalWaterTaxDue += waterTax;
+
+      const existing = propertyMap.get(p.propertyNo);
+      if (existing) {
+        existing.houseTaxDue += houseTax;
+        existing.waterTaxDue += waterTax;
+        existing.totalDue += (houseTax + waterTax);
+      } else {
+        propertyMap.set(p.propertyNo, {
+          propertyNo: p.propertyNo,
+          ownerName: p.ownerName,
+          ownerNameEn: p.ownerNameEn,
+          wardNo: p.wardNo,
+          mobileNumber: p.mobileNumber,
+          houseTaxDue: houseTax,
+          waterTaxDue: waterTax,
+          totalDue: houseTax + waterTax
+        });
+      }
+    });
+
     let defaulterCount = 0;
     const defaulterList: any[] = [];
 
-    activeProps.forEach(p => {
-      const totalDue = p.houseTaxDue + p.waterTaxDue;
-      totalHouseTaxDue += p.houseTaxDue;
-      totalWaterTaxDue += p.waterTaxDue;
-
-      if (totalDue > 0) {
+    for (const p of propertyMap.values()) {
+      if (p.totalDue > 0) {
         defaulterCount++;
         defaulterList.push({
           propertyNo: p.propertyNo,
@@ -345,18 +436,18 @@ class MockDatabase {
           ownerNameEn: p.ownerNameEn,
           wardNo: p.wardNo,
           mobileNumber: p.mobileNumber,
-          totalDue
+          totalDue: p.totalDue
         });
       }
-    });
+    }
 
     defaulterList.sort((a, b) => b.totalDue - a.totalDue);
 
     // Filter txns by ward and year
-    let txns = this.transactions.filter(t => t.status === 'SUCCESS' && t.financialYear === year);
-    if (ward && ward !== 'all') {
-      const propsInWard = new Set(this.properties.filter(p => p.wardNo === parseInt(ward, 10)).map(p => p.propertyNo));
-      txns = txns.filter(t => propsInWard.has(t.propertyNo));
+    let txns = this.transactions.filter(t => t.status === 'SUCCESS' && years.includes(t.financialYear));
+    if (wards.length > 0) {
+      const propsInWards = new Set(this.properties.filter(p => wards.includes(p.wardNo)).map(p => p.propertyNo));
+      txns = txns.filter(t => propsInWards.has(t.propertyNo));
     }
 
     let totalCollected = 0;
@@ -381,27 +472,33 @@ class MockDatabase {
 
     // Ward Stats
     const wardStats = [1, 2, 3].map(wNo => {
-      const wProps = this.properties.filter(p => p.isActive && p.financialYear === year && p.wardNo === wNo);
+      const wProps = this.properties.filter(p => p.isActive && years.includes(p.financialYear) && p.wardNo === wNo);
+      
+      const wPropMap = new Map<string, number>();
       let wDue = 0;
-      let wDefaulters = 0;
       wProps.forEach(p => {
         const d = p.houseTaxDue + p.waterTaxDue;
         wDue += d;
-        if (d > 0) wDefaulters++;
+        wPropMap.set(p.propertyNo, (wPropMap.get(p.propertyNo) || 0) + d);
       });
 
+      let wDefaulters = 0;
+      for (const d of wPropMap.values()) {
+        if (d > 0) wDefaulters++;
+      }
+
       const wTxns = this.transactions.filter(t => {
-        if (t.status !== 'SUCCESS' || t.financialYear !== year) return false;
-        const p = this.properties.find(prop => prop.propertyNo === t.propertyNo && prop.financialYear === year);
+        if (t.status !== 'SUCCESS' || !years.includes(t.financialYear)) return false;
+        const p = this.properties.find(prop => prop.propertyNo === t.propertyNo && years.includes(prop.financialYear));
         return p && p.wardNo === wNo;
       });
       const wCollected = wTxns.reduce((sum, t) => sum + t.amountPaid, 0);
 
       return {
         wardNo: wNo,
-        totalProperties: wProps.length,
+        totalProperties: wPropMap.size,
         propertiesWithDues: wDefaulters,
-        paidUpProperties: wProps.length - wDefaulters,
+        paidUpProperties: wPropMap.size - wDefaulters,
         totalDue: wDue,
         totalCollected: wCollected
       };
@@ -410,7 +507,7 @@ class MockDatabase {
     return {
       financialYear: year,
       overview: {
-        totalProperties: activeProps.length,
+        totalProperties: propertyMap.size,
         totalExpected,
         totalCollected,
         totalPending: totalHouseTaxDue + totalWaterTaxDue,
@@ -428,7 +525,7 @@ class MockDatabase {
       },
       defaulters: {
         count: defaulterCount,
-        paidUpCount: activeProps.length - defaulterCount,
+        paidUpCount: propertyMap.size - defaulterCount,
         list: defaulterList.slice(0, 50)
       },
       wardStats
@@ -563,6 +660,32 @@ class MockDatabase {
     });
 
     return { success: true, assessedCount };
+  }
+
+  getCommunicationLogs(propertyNo: string) {
+    return this.communicationLogs
+      .filter(l => l.propertyNo.toUpperCase() === propertyNo.toUpperCase())
+      .sort((a, b) => b.sentAt.getTime() - a.sentAt.getTime());
+  }
+
+  recordCommunicationLog(data: {
+    propertyNo: string;
+    type: string;
+    recipient: string;
+    message: string;
+    sentBy?: string;
+  }) {
+    const newLog: MockCommunicationLog = {
+      id: this.logIdCounter++,
+      propertyNo: data.propertyNo.toUpperCase(),
+      type: data.type,
+      recipient: data.recipient,
+      message: data.message,
+      sentBy: data.sentBy || 'ग्रामसेवक',
+      sentAt: new Date()
+    };
+    this.communicationLogs.push(newLog);
+    return newLog;
   }
 
   private calculateTotalDue(p: MockProperty) {

@@ -24,15 +24,21 @@ export async function GET(request: NextRequest) {
 
   try {
     const { searchParams } = new URL(request.url)
-    const ward = searchParams.get('ward')
+    const wardParam = searchParams.get('ward')
     const showDefaultersOnly = searchParams.get('defaulters') === 'true'
-    const year = searchParams.get('year') || '2025-26'
+    const yearParam = searchParams.get('year')
+
+    const years = yearParam ? yearParam.split(',').map(y => y.trim()).filter(Boolean) : ['2025-26']
+    let wards: number[] = []
+    if (wardParam && wardParam !== 'all') {
+      wards = wardParam.split(',').map(w => parseInt(w.trim(), 10)).filter(w => !isNaN(w))
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const where: any = { isActive: true, financialYear: year }
+    const where: any = { isActive: true, financialYear: { in: years } }
 
-    if (ward && ['1', '2', '3'].includes(ward)) {
-      where.wardNo = parseInt(ward, 10)
+    if (wards.length > 0) {
+      where.wardNo = { in: wards }
     }
 
     const properties = await runWithFallback(
@@ -46,29 +52,68 @@ export async function GET(request: NextRequest) {
         },
       }),
       () => {
-        const res = mockDb.searchProperties(undefined, ward || undefined, 0, 1000, year);
+        const res = mockDb.searchProperties(undefined, wardParam || undefined, 0, 1000, yearParam || undefined);
         return res.properties.map(p => ({
           ...p,
           _count: {
-            transactions: mockDb.transactions.filter(t => t.propertyNo === p.propertyNo && t.financialYear === year).length
+            transactions: mockDb.transactions.filter(t => t.propertyNo === p.propertyNo && years.includes(t.financialYear) && t.status === 'SUCCESS').length
           }
         })) as any;
       }
     )
 
-    let result = properties.map((p: any) => ({
+    // Consolidate properties by propertyNo
+    const propertyMap = new Map<string, {
+      propertyNo: string
+      ownerName: string
+      ownerNameEn: string | null
+      wardNo: number
+      mobileNumber: string
+      address: string | null
+      houseTaxDue: number
+      waterTaxDue: number
+      transactionCount: number
+    }>()
+
+    for (const p of properties) {
+      const houseTax = Number(p.houseTaxDue)
+      const waterTax = Number(p.waterTaxDue)
+      const txnsCount = p._count?.transactions || p.transactionCount || 0
+
+      const existing = propertyMap.get(p.propertyNo)
+      if (existing) {
+        existing.houseTaxDue += houseTax
+        existing.waterTaxDue += waterTax
+        existing.transactionCount += txnsCount
+      } else {
+        propertyMap.set(p.propertyNo, {
+          propertyNo: p.propertyNo,
+          ownerName: p.ownerName,
+          ownerNameEn: p.ownerNameEn,
+          wardNo: p.wardNo,
+          mobileNumber: p.mobileNumber,
+          address: p.address,
+          houseTaxDue: houseTax,
+          waterTaxDue: waterTax,
+          transactionCount: txnsCount
+        })
+      }
+    }
+
+    let result = Array.from(propertyMap.values()).map((p: any) => ({
       ...p,
-      houseTaxDue: Number(p.houseTaxDue),
-      waterTaxDue: Number(p.waterTaxDue),
-      totalDue:
-        Number(p.houseTaxDue) +
-        Number(p.waterTaxDue),
-      transactionCount: p._count.transactions,
+      houseTaxDue: p.houseTaxDue,
+      waterTaxDue: p.waterTaxDue,
+      totalDue: p.houseTaxDue + p.waterTaxDue,
+      transactionCount: p.transactionCount,
     }))
 
     if (showDefaultersOnly) {
       result = result.filter((p: any) => p.totalDue > 0)
     }
+
+    // Sort by propertyNo asc
+    result.sort((a, b) => a.propertyNo.localeCompare(b.propertyNo))
 
     return NextResponse.json({
       success: true,
