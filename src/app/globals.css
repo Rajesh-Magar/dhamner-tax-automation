@@ -1,6 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+Devanagari:wght@300;400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
+@variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
@@ -18,4 +20,144 @@ body {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* --- Accessibility Font Size Zoom & Smooth Transition --- */
+html, body, button, input, select, textarea, div, p, span, table {
+  transition: font-size 0.2s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, color 0.15s ease-in-out;
+}
+
+/* --- DARK MODE THEME OVERRIDES --- */
+.dark {
+  --background: #0b0f19;
+  --foreground: #f1f5f9;
+
+  /* Main background overrides */
+  body,
+  .bg-\[\#F8FAFC\] {
+    background-color: #0b0f19 !important;
+  }
+
+  /* Card and sidebar backgrounds */
+  .bg-white,
+  .bg-\[\#F1F5F9\],
+  .bg-slate-50,
+  .bg-slate-50\/50 {
+    background-color: #1e293b !important;
+  }
+
+  /* Transparent sticky header */
+  .bg-white\/80 {
+    background-color: rgba(30, 41, 59, 0.8) !important;
+  }
+
+  /* Border colors */
+  .border-slate-100,
+  .border-slate-200,
+  .border-slate-200\/80,
+  .border-slate-300 {
+    border-color: #334155 !important;
+  }
+
+  /* Text colors */
+  .text-slate-900,
+  .text-slate-800,
+  .text-slate-700 {
+    color: #f1f5f9 !important;
+  }
+
+  .text-slate-600,
+  .text-slate-500 {
+    color: #94a3b8 !important;
+  }
+
+  .text-slate-400 {
+    color: #64748b !important;
+  }
+
+  /* Hovers & active states */
+  .hover\:bg-slate-50:hover,
+  .hover\:bg-slate-100:hover,
+  .hover\:bg-slate-200\/50:hover,
+  .hover\:bg-slate-100\/50:hover,
+  .bg-slate-200\/50 {
+    background-color: rgba(51, 65, 85, 0.5) !important;
+  }
+
+  .hover\:text-slate-800:hover,
+  .hover\:text-slate-900:hover {
+    color: #ffffff !important;
+  }
+
+  /* Form Elements (input, select, textarea) */
+  input,
+  select,
+  textarea {
+    background-color: #0f172a !important;
+    border-color: #334155 !important;
+    color: #f1f5f9 !important;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #475569 !important;
+  }
+
+  /* Tables styling */
+  thead tr {
+    background-color: #0f172a !important;
+    border-color: #334155 !important;
+  }
+
+  tbody tr {
+    border-color: #1e293b !important;
+  }
+
+  tbody tr:hover {
+    background-color: rgba(51, 65, 85, 0.2) !important;
+  }
+
+  /* Scrollbars in dark mode */
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: #1e293b !important;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #475569 !important;
+    border: 3px solid #1e293b !important;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #64748b !important;
+  }
+
+  .opacity-25 {
+    opacity: 0.15 !important;
+  }
+}
+
+/* --- PRINT WORKFLOW OVERRIDES FOR DARK MODE --- */
+@media print {
+  .dark {
+    background-color: white !important;
+    color: black !important;
+  }
+  
+  .dark body,
+  .dark div,
+  .dark span,
+  .dark p,
+  .dark table,
+  .dark tr,
+  .dark td,
+  .dark th,
+  .dark aside,
+  .dark header,
+  .dark main {
+    background-color: white !important;
+    color: black !important;
+    border-color: #e2e8f0 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
 }

@@ -144,6 +144,14 @@ export default function AdminDashboard() {
   const [importLog, setImportLog] = useState<string[]>([]);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
 
+  // Layout states
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
+
+  // Accessibility zoom & Theme states
+  const [fontSizeLevel, setFontSizeLevel] = useState<number>(0);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+
   useEffect(() => {
     // Route Protection check
     const loggedIn = localStorage.getItem("admin_session") === "true";
@@ -152,7 +160,48 @@ export default function AdminDashboard() {
     } else {
       setAuthChecked(true);
     }
+
+    // Load settings from localStorage
+    const savedTheme = localStorage.getItem("admin_theme");
+    if (savedTheme === "dark" || savedTheme === "light") {
+      setTheme(savedTheme);
+    } else {
+      const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      setTheme(systemPrefersDark ? "dark" : "light");
+    }
+
+    const savedFontSize = localStorage.getItem("admin_font_size_level");
+    if (savedFontSize) {
+      setFontSizeLevel(parseInt(savedFontSize, 10));
+    }
   }, []);
+
+  // Effect to apply theme class
+  useEffect(() => {
+    if (theme === "dark") {
+      document.documentElement.classList.add("dark");
+      localStorage.setItem("admin_theme", "dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+      localStorage.setItem("admin_theme", "light");
+    }
+  }, [theme]);
+
+  // Effect to apply font size levels
+  useEffect(() => {
+    const sizes = {
+      "-1": "14px",
+      "0": "16px",
+      "1": "18px"
+    };
+    const size = sizes[fontSizeLevel.toString() as "-1" | "0" | "1"] || "16px";
+    document.documentElement.style.fontSize = size;
+    localStorage.setItem("admin_font_size_level", fontSizeLevel.toString());
+
+    return () => {
+      document.documentElement.style.fontSize = "";
+    };
+  }, [fontSizeLevel]);
 
   const loadDashboardData = async () => {
     if (!authChecked) return;
@@ -248,7 +297,37 @@ export default function AdminDashboard() {
 
   const handlePrintNotice = async (prop: any) => {
     if (!prop || !prop.propertyNo) return;
-    setPrintableNoticeProperty(prop);
+    
+    let fullProp = prop;
+    try {
+      const res = await fetch(`/api/properties/${prop.propertyNo}`);
+      const resJson = await res.json();
+      if (resJson.success && resJson.data) {
+        const data = resJson.data;
+        const houseTaxAssessed = data.yearDues.reduce((sum: number, yd: any) => sum + Number(yd.houseTaxAssessed || 0), 0);
+        const houseTaxPaid = data.yearDues.reduce((sum: number, yd: any) => sum + Number(yd.houseTaxPaid || 0), 0);
+        const houseTaxDue = data.yearDues.reduce((sum: number, yd: any) => sum + Number(yd.houseTaxDue || 0), 0);
+        const waterTaxAssessed = data.yearDues.reduce((sum: number, yd: any) => sum + Number(yd.waterTaxAssessed || 0), 0);
+        const waterTaxPaid = data.yearDues.reduce((sum: number, yd: any) => sum + Number(yd.waterTaxPaid || 0), 0);
+        const waterTaxDue = data.yearDues.reduce((sum: number, yd: any) => sum + Number(yd.waterTaxDue || 0), 0);
+        const totalDue = houseTaxDue + waterTaxDue;
+        
+        fullProp = {
+          ...data,
+          houseTaxAssessed,
+          houseTaxPaid,
+          houseTaxDue,
+          waterTaxAssessed,
+          waterTaxPaid,
+          waterTaxDue,
+          totalDue
+        };
+      }
+    } catch (err) {
+      console.error("Error fetching full property for notice:", err);
+    }
+
+    setPrintableNoticeProperty(fullProp);
     
     try {
       await fetch(`/api/properties/${prop.propertyNo}/notifications`, {
@@ -257,7 +336,7 @@ export default function AdminDashboard() {
         body: JSON.stringify({
           type: "PRINT",
           recipient: prop.ownerName,
-          message: `कराची मागणी नोटीस प्रिंट केली (एकूण थकबाकी ₹${Number(prop.totalDue || 0).toFixed(2)})`,
+          message: `कराची मागणी नोटीस प्रिंट केली (एकूण थकबाकी ₹${Number(fullProp.totalDue || 0).toFixed(2)})`,
           sentBy: "ग्रामसेवक"
         })
       });
@@ -747,7 +826,7 @@ export default function AdminDashboard() {
         {selectedFys.map(fy => (
           <span 
             key={fy} 
-            className="inline-flex items-center gap-1 bg-slate-100 border border-slate-200 text-slate-700 px-2.5 py-0.5 rounded-full text-[10px] font-semibold select-none transition-all hover:border-slate-300"
+            className="inline-flex items-center gap-1 bg-[#1E3A5F]/5 border border-[#1E3A5F]/10 text-[#1E3A5F] px-2.5 py-0.5 rounded-full text-[10px] font-semibold select-none transition-all hover:border-[#1E3A5F]/20"
           >
             {formatFyTag(fy)}
             {selectedFys.length > 1 && (
@@ -763,7 +842,7 @@ export default function AdminDashboard() {
         {selectedWards.map(ward => (
           <span 
             key={ward} 
-            className="inline-flex items-center gap-1 bg-slate-100 border border-slate-200 text-slate-700 px-2.5 py-0.5 rounded-full text-[10px] font-semibold select-none transition-all hover:border-slate-300"
+            className="inline-flex items-center gap-1 bg-[#1E3A5F]/5 border border-[#1E3A5F]/10 text-[#1E3A5F] px-2.5 py-0.5 rounded-full text-[10px] font-semibold select-none transition-all hover:border-[#1E3A5F]/20"
           >
             {getWardTagLabel(ward)}
             {selectedWards.length > 1 && (
@@ -780,8 +859,8 @@ export default function AdminDashboard() {
     );
   };
 
-  // Filters search outputs
-  const filteredDefaulters = stats?.defaulters.list.filter(d => {
+  // Filters search outputs with proper sorting wired up
+  const filteredDefaulters = [...(stats?.defaulters.list.filter(d => {
     const q = defaulterSearch.toLowerCase().trim();
     if (!q) return true;
     return (
@@ -790,9 +869,23 @@ export default function AdminDashboard() {
       d.propertyNo.toLowerCase().includes(q) ||
       (d.mobileNumber && d.mobileNumber.includes(q))
     );
-  }) || [];
+  }) || [])].sort((a, b) => {
+    if (defaulterSort === "due_desc") {
+      return b.totalDue - a.totalDue;
+    }
+    if (defaulterSort === "due_asc") {
+      return a.totalDue - b.totalDue;
+    }
+    if (defaulterSort === "prop_asc") {
+      return a.propertyNo.localeCompare(b.propertyNo, undefined, { numeric: true, sensitivity: 'base' });
+    }
+    if (defaulterSort === "name_asc") {
+      return a.ownerName.localeCompare(b.ownerName, lang === "mr" ? "mr" : "en");
+    }
+    return 0;
+  });
 
-  const filteredProperties = properties.filter(p => {
+  const filteredProperties = [...(properties.filter(p => {
     const q = propertySearch.toLowerCase().trim();
     if (!q) return true;
     return (
@@ -801,101 +894,257 @@ export default function AdminDashboard() {
       p.propertyNo.toLowerCase().includes(q) ||
       (p.mobileNumber && p.mobileNumber.includes(q))
     );
-  }) || [];
+  }) || [])].sort((a, b) => {
+    if (propertySort === "due_desc") {
+      return b.totalDue - a.totalDue;
+    }
+    if (propertySort === "due_asc") {
+      return a.totalDue - b.totalDue;
+    }
+    if (propertySort === "prop_asc") {
+      return a.propertyNo.localeCompare(b.propertyNo, undefined, { numeric: true, sensitivity: 'base' });
+    }
+    if (propertySort === "name_asc") {
+      return a.ownerName.localeCompare(b.ownerName, lang === "mr" ? "mr" : "en");
+    }
+    return 0;
+  });
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
-      <Navbar />
+    <div className="min-h-screen flex bg-[#F8FAFC] dark:bg-slate-950 text-slate-800 dark:text-slate-100 overflow-hidden w-full transition-colors">
+      
+      {/* Collapsible Left Navigation Sidebar */}
+      <aside className={`bg-[#F1F5F9] dark:bg-slate-900 border-r border-slate-200/80 dark:border-slate-800 text-slate-700 dark:text-slate-300 transition-all duration-300 z-50 flex flex-col shrink-0 ${
+        sidebarOpen ? "w-48" : "w-20"
+      }`}>
+        {/* Sidebar Header with Logo */}
+        <div className="p-4 border-b border-slate-200/80 dark:border-slate-800 flex items-center gap-3 h-16 shrink-0 overflow-hidden">
+          <div className="w-9 h-9 rounded-full overflow-hidden shrink-0 flex items-center justify-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+            <img 
+              src="/assets/Gemini_Generated_Image_7qc6v97qc6v97qc6-removebg-preview.png" 
+              className="w-full h-full object-cover" 
+              alt="YG Logo" 
+            />
+          </div>
+          {sidebarOpen && (
+            <div className="overflow-hidden whitespace-nowrap animate-in fade-in duration-200">
+              <h1 className="font-extrabold text-slate-800 dark:text-slate-100 text-xs tracking-tight leading-tight">
+                {lang === "mr" ? "यशवंत ग्रामपंचायत" : "Yashwant Grampanchayat"}
+              </h1>
+              <p className="text-[9px] text-slate-500 dark:text-slate-400 font-bold tracking-wide">
+                {lang === "mr" ? "धामणेर, सातारा" : "Dhamner, Satara"}
+              </p>
+            </div>
+          )}
+        </div>
 
-      <div className="flex-1 flex flex-col md:flex-row max-w-7xl w-full mx-auto px-4 py-8 gap-6">
-        
-        {/* Left Side Tab Navigation */}
-        <aside className="w-full md:w-64 shrink-0 space-y-2">
-          <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm space-y-1">
-            <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 mb-2">
+        {/* Sidebar Navigation */}
+        <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto custom-scrollbar">
+          {sidebarOpen && (
+            <span className="block text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest px-3 mb-2">
               {lang === "mr" ? "मुख्य मेनू" : "Main Menu"}
             </span>
-            
-            <SidebarBtn active={activeTab === "overview"} onClick={() => setActiveTab("overview")} icon="📊" label={lang === "mr" ? "वसुली आकडेवारी" : "Collection Stats"} />
-            <SidebarBtn active={activeTab === "defaulters"} onClick={() => setActiveTab("defaulters")} icon="⚠️" label={lang === "mr" ? "थकबाकीदार यादी" : "Defaulters List"} />
-            <SidebarBtn active={activeTab === "cash"} onClick={() => setActiveTab("cash")} icon="💵" label={lang === "mr" ? "रोख कर भरणा" : "Record Cash"} />
-            <SidebarBtn active={activeTab === "properties"} onClick={() => setActiveTab("properties")} icon="🏠" label={lang === "mr" ? "मालमत्ता यादी" : "Properties List"} />
-            <SidebarBtn active={activeTab === "import"} onClick={() => setActiveTab("import")} icon="📥" label={lang === "mr" ? "डेटा आयात (Import)" : "Import Data"} />
-            <SidebarBtn active={activeTab === "assess"} onClick={() => setActiveTab("assess")} icon="⚙️" label={lang === "mr" ? "आकारणी व rollover" : "Assessment & Rollover"} />
-          </div>
+          )}
+          
+          <SidebarBtn sidebarOpen={sidebarOpen} active={activeTab === "overview"} onClick={() => setActiveTab("overview")} icon="📊" label={lang === "mr" ? "वसुली आकडेवारी" : "Collection Stats"} />
+          <SidebarBtn sidebarOpen={sidebarOpen} active={activeTab === "defaulters"} onClick={() => setActiveTab("defaulters")} icon="⚠️" label={lang === "mr" ? "थकबाकीदार यादी" : "Defaulters List"} />
+          <SidebarBtn sidebarOpen={sidebarOpen} active={activeTab === "cash"} onClick={() => setActiveTab("cash")} icon="💵" label={lang === "mr" ? "रोख कर भरणा" : "Record Cash"} />
+          <SidebarBtn sidebarOpen={sidebarOpen} active={activeTab === "properties"} onClick={() => setActiveTab("properties")} icon="🏠" label={lang === "mr" ? "मालमत्ता यादी" : "Properties List"} />
+          <SidebarBtn sidebarOpen={sidebarOpen} active={activeTab === "import"} onClick={() => setActiveTab("import")} icon="📥" label={lang === "mr" ? "डेटा आयात (Import)" : "Import Data"} />
+          <SidebarBtn sidebarOpen={sidebarOpen} active={activeTab === "assess"} onClick={() => setActiveTab("assess")} icon="⚙️" label={lang === "mr" ? "आकारणी व rollover" : "Assessment & Rollover"} />
+        </nav>
 
-          {/* Quick Ward Selector */}
-          <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">
-              {lang === "mr" ? "प्रभाग निवडा" : "Select Ward"}
-            </label>
-            <div className="space-y-2">
-              {[
-                { val: "1", label: lang === "mr" ? "प्रभाग १ (Ward 1)" : "Ward 1" },
-                { val: "2", label: lang === "mr" ? "प्रभाग २ (Ward 2)" : "Ward 2" },
-                { val: "3", label: lang === "mr" ? "प्रभाग ३ (Ward 3)" : "Ward 3" }
-              ].map(w => {
-                const isChecked = selectedWards.includes(w.val);
-                return (
-                  <label key={w.val} className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer select-none hover:text-slate-900 transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={() => {
-                        if (isChecked) {
-                          if (selectedWards.length > 1) {
-                            setSelectedWards(selectedWards.filter(v => v !== w.val));
+        {/* Sidebar Footer Ward & FY selectors */}
+        {sidebarOpen ? (
+          <div className="p-4 border-t border-slate-200/80 dark:border-slate-800 space-y-4 text-xs bg-slate-50/50 dark:bg-slate-900/50">
+            {/* Quick Ward Selector */}
+            <div>
+              <label className="block text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">
+                {lang === "mr" ? "प्रभाग" : "Wards"}
+              </label>
+              <div className="space-y-1">
+                {[
+                  { val: "1", label: lang === "mr" ? "प्रभाग १ (Ward 1)" : "Ward 1" },
+                  { val: "2", label: lang === "mr" ? "प्रभाग २ (Ward 2)" : "Ward 2" },
+                  { val: "3", label: lang === "mr" ? "प्रभाग ३ (Ward 3)" : "Ward 3" }
+                ].map(w => {
+                  const isChecked = selectedWards.includes(w.val);
+                  return (
+                    <label key={w.val} className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-400 cursor-pointer select-none hover:text-slate-800 dark:hover:text-slate-200 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {
+                          if (isChecked) {
+                            if (selectedWards.length > 1) {
+                              setSelectedWards(selectedWards.filter(v => v !== w.val));
+                            }
+                          } else {
+                            setSelectedWards([...selectedWards, w.val]);
                           }
-                        } else {
-                          setSelectedWards([...selectedWards, w.val]);
-                        }
-                      }}
-                      className="rounded border-slate-300 text-slate-900 focus:ring-slate-900 w-4 h-4 cursor-pointer accent-slate-900"
-                    />
-                    <span>{w.label}</span>
-                  </label>
-                );
-              })}
+                        }}
+                        className="rounded border-slate-300 dark:border-slate-700 text-sky-600 focus:ring-sky-500 bg-white dark:bg-slate-800 w-3.5 h-3.5 cursor-pointer accent-sky-600"
+                      />
+                      <span>{w.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Financial Year Selector */}
+            <div>
+              <label className="block text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">
+                {lang === "mr" ? "आर्थिक वर्ष" : "Fiscal Year"}
+              </label>
+              <div className="space-y-1">
+                {["2025-26", "2026-27", "2027-28"].map(fy => {
+                  const isChecked = selectedFys.includes(fy);
+                  return (
+                    <label key={fy} className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-400 cursor-pointer select-none hover:text-slate-800 dark:hover:text-slate-200 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {
+                          if (isChecked) {
+                            if (selectedFys.length > 1) {
+                              setSelectedFys(selectedFys.filter(v => v !== fy));
+                            }
+                          } else {
+                            setSelectedFys([...selectedFys, fy]);
+                          }
+                        }}
+                        className="rounded border-slate-300 text-sky-600 focus:ring-sky-500 bg-white w-3.5 h-3.5 cursor-pointer accent-sky-600"
+                      />
+                      <span>{fy}</span>
+                    </label>
+                  );
+                })}
+              </div>
             </div>
           </div>
-
-          {/* Financial Year Selector */}
-          <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">
-              {lang === "mr" ? "आर्थिक वर्ष निवडा" : "Select Financial Year"}
-            </label>
-            <div className="space-y-2">
-              {["2025-26", "2026-27", "2027-28"].map(fy => {
-                const isChecked = selectedFys.includes(fy);
-                return (
-                  <label key={fy} className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer select-none hover:text-slate-900 transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={() => {
-                        if (isChecked) {
-                          if (selectedFys.length > 1) {
-                            setSelectedFys(selectedFys.filter(v => v !== fy));
-                          }
-                        } else {
-                          setSelectedFys([...selectedFys, fy]);
-                        }
-                      }}
-                      className="rounded border-slate-300 text-slate-900 focus:ring-slate-900 w-4 h-4 cursor-pointer accent-slate-900"
-                    />
-                    <span>{fy}</span>
-                  </label>
-                );
-              })}
-            </div>
+        ) : (
+          <div className="p-3 border-t border-slate-200/80 text-center text-slate-400 font-bold text-[10px] bg-slate-50/50" title={lang === "mr" ? "वॉर्ड आणि आर्थिक वर्ष पाहण्यासाठी डावा मेनू मोठा करा" : "Expand sidebar to configure Wards and Years"}>
+            ⚙️
           </div>
-        </aside>
+        )}
+      </aside>
 
-        {/* Right Side Working Area */}
-        <main className="flex-1 min-w-0 space-y-6">
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+        
+        {/* Sticky Dashboard Header */}
+        <header className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-200 dark:border-slate-800 h-16 flex items-center justify-between px-6 shrink-0 transition-colors">
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl text-slate-500 dark:text-slate-400 transition-colors cursor-pointer"
+              title={sidebarOpen ? (lang === "mr" ? "मेनू लहान करा" : "Collapse Sidebar") : (lang === "mr" ? "मेनू मोठा करा" : "Expand Sidebar")}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <h2 className="text-base md:text-lg font-bold text-slate-800 dark:text-slate-100 tracking-tight">
+              {activeTab === "overview" && (lang === "mr" ? "वसुली आकडेवारी" : "Collection Summary")}
+              {activeTab === "defaulters" && (lang === "mr" ? "थकबाकीदार यादी" : "Defaulters Directory")}
+              {activeTab === "cash" && (lang === "mr" ? "रोख कर भरणा" : "Record Cash Payment")}
+              {activeTab === "properties" && (lang === "mr" ? "मालमत्ता यादी" : "Property Directory")}
+              {activeTab === "import" && (lang === "mr" ? "डेटा आयात (Import)" : "Import Records")}
+              {activeTab === "assess" && (lang === "mr" ? "आकारणी व rollover" : "Assessment & Rollover")}
+            </h2>
+          </div>
+          
+          <div className="flex items-center gap-3 md:gap-4">
+            {/* Display Active FY Badge */}
+            <div className="hidden sm:flex items-center bg-sky-50 dark:bg-sky-950/40 border border-sky-100 dark:border-sky-900/50 p-1.5 px-3 rounded-full text-[10px] font-extrabold text-sky-700 dark:text-sky-400 uppercase tracking-wider">
+              {lang === "mr" ? "आर्थिक वर्ष:" : "FY:"} {selectedFys.join(", ")}
+            </div>
+
+            {/* Accessibility Font Size Buttons (A-, A, A+) */}
+            <div className="flex items-center border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden bg-white dark:bg-slate-900 shadow-sm shrink-0">
+              <button 
+                onClick={() => setFontSizeLevel(-1)}
+                className={`w-8 h-8 flex items-center justify-center text-xs font-bold transition-colors border-r border-slate-200 dark:border-slate-800 cursor-pointer ${
+                  fontSizeLevel === -1 
+                    ? "bg-sky-500 text-white" 
+                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                }`}
+                title={lang === "mr" ? "फॉन्ट लहान करा" : "Decrease Font Size"}
+              >
+                A-
+              </button>
+              <button 
+                onClick={() => setFontSizeLevel(0)}
+                className={`w-8 h-8 flex items-center justify-center text-xs font-bold transition-colors border-r border-slate-200 dark:border-slate-800 cursor-pointer ${
+                  fontSizeLevel === 0 
+                    ? "bg-sky-500 text-white" 
+                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                }`}
+                title={lang === "mr" ? "फॉन्ट मूळ आकार" : "Reset Font Size"}
+              >
+                A
+              </button>
+              <button 
+                onClick={() => setFontSizeLevel(1)}
+                className={`w-8 h-8 flex items-center justify-center text-xs font-bold transition-colors cursor-pointer ${
+                  fontSizeLevel === 1 
+                    ? "bg-sky-500 text-white" 
+                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                }`}
+                title={lang === "mr" ? "फॉन्ट मोठा करा" : "Increase Font Size"}
+              >
+                A+
+              </button>
+            </div>
+
+            {/* Theme Toggle Button */}
+            <button
+              onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+              className="w-8 h-8 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-center cursor-pointer transition-all shadow-sm active:scale-[0.98] shrink-0"
+              title={theme === "light" ? (lang === "mr" ? "गडद मोड चालू करा" : "Switch to Dark Mode") : (lang === "mr" ? "प्रकाश मोड चालू करा" : "Switch to Light Mode")}
+            >
+              {theme === "light" ? (
+                <svg className="w-3.5 h-3.5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m0 13.5V21M4.978 4.978l1.591 1.591m10.862 10.862l1.591 1.591M21.25 12h-2.25M5.25 12H3m4.722 4.722l-1.591 1.591m10.862-10.862l-1.591 1.591M12 7a5 5 0 100 10 5 5 0 000-10z" />
+                </svg>
+              )}
+            </button>
+
+            {/* Language Switcher */}
+            <button
+              onClick={toggleLang}
+              className="h-8 px-3 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-sky-600 dark:text-sky-400 text-[11px] font-extrabold rounded-xl border border-slate-200 dark:border-slate-800 cursor-pointer transition-all shadow-sm active:scale-[0.98]"
+            >
+              {lang === "mr" ? "English" : "मराठी"}
+            </button>
+
+            {/* Logout Button */}
+            <button
+              onClick={() => {
+                localStorage.removeItem("admin_session");
+                document.cookie = "admin_session=; path=/; max-age=0;";
+                router.push("/admin/login");
+              }}
+              className="h-8 px-3 bg-red-50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-950/30 text-red-600 dark:text-red-400 text-[11px] font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition-all active:scale-[0.98]"
+            >
+              <svg className="w-3.5 h-3.5 stroke-[2.5]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+              <span>{lang === "mr" ? "बाहेर पडा" : "Logout"}</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Dashboard Work Area with Scroll */}
+        <main className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6 bg-[#F8FAFC] custom-scrollbar">
           {loading ? (
             <div className="bg-white rounded-3xl border border-slate-100 p-12 flex flex-col items-center justify-center text-center shadow-sm">
-              <svg className="animate-spin h-8 w-8 text-slate-900 mb-3" fill="none" viewBox="0 0 24 24">
+              <svg className="animate-spin h-8 w-8 text-sky-500 mb-3" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
               </svg>
@@ -928,45 +1177,66 @@ export default function AdminDashboard() {
                     <StatsCard 
                       label={lang === "mr" ? "एकूण अपेक्षित वसुली" : "Total Expected"} 
                       val={`₹${stats.overview.totalExpected.toLocaleString("mr-IN")}`} 
-                      borderColor="border-l-slate-900" 
-                      bgColor="bg-white" 
-                      textColor="text-slate-900" 
-                      icon="📈" 
+                      borderColor="border-l-sky-700" 
+                      bgColor="bg-sky-500 border-sky-400" 
+                      textColor="text-white" 
+                      labelColor="text-sky-100" 
+                      icon={
+                        <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white border border-white/20">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18L9 11.25l4.5 4.5L21.75 5.25M21.75 5.25h-5.25M21.75 5.25v5.25" />
+                          </svg>
+                        </div>
+                      } 
                     />
                     <StatsCard 
                       label={lang === "mr" ? "एकूण संकलित कर" : "Total Collected"} 
                       val={`₹${stats.overview.totalCollected.toLocaleString("mr-IN")}`} 
-                      borderColor="border-l-green-600" 
-                      bgColor="bg-white" 
-                      textColor="text-green-700" 
-                      icon="✅" 
+                      borderColor="border-l-emerald-700" 
+                      bgColor="bg-emerald-500 border-emerald-400" 
+                      textColor="text-white" 
+                      labelColor="text-emerald-100" 
+                      icon={
+                        <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white border border-white/20">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z" />
+                          </svg>
+                        </div>
+                      } 
                     />
                     <StatsCard 
                       label={lang === "mr" ? "उर्वरित थकबाकी" : "Pending Dues"} 
                       val={`₹${stats.overview.totalPending.toLocaleString("mr-IN")}`} 
-                      borderColor="border-l-orange-600" 
-                      bgColor="bg-white" 
-                      textColor="text-orange-700" 
-                      icon="⏳" 
+                      borderColor="border-l-orange-700" 
+                      bgColor="bg-orange-500 border-orange-400" 
+                      textColor="text-white" 
+                      labelColor="text-orange-100" 
+                      icon={
+                        <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white border border-white/20">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        </div>
+                      } 
                     />
                     {/* SVG circular progress ring replaces Collection % card */}
-                    <div className="p-4 rounded-3xl shadow-sm border border-slate-100 bg-white flex items-center justify-between transition-all duration-300 hover:shadow-md border-l-4 border-l-blue-600">
+                    <div className="p-4 rounded-3xl shadow-sm border border-purple-400 bg-purple-600 flex items-center justify-between transition-all duration-300 hover:shadow-md border-l-4 border-l-purple-800 text-white">
                       <div className="flex flex-col justify-between h-full">
-                        <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
+                        <span className="text-[10px] font-extrabold text-purple-100 uppercase tracking-wider">
                           {lang === "mr" ? "वसुली टक्केवारी" : "Collection %"}
                         </span>
-                        <span className="text-lg md:text-xl font-extrabold mt-3 tracking-tight text-blue-700">
+                        <span className="text-2xl md:text-3xl font-extrabold mt-3 tracking-tight text-white">
                           {stats.overview.collectionPercentage}%
                         </span>
                       </div>
                       <div className="relative w-12 h-12 md:w-14 md:h-14 shrink-0 ml-2">
                         {/* Background Circle */}
-                        <svg className="w-full h-full transform -rotate-90">
+                        <svg className="w-full h-full transform -rotate-90" viewBox="0 0 56 56">
                           <circle
                             cx="28"
                             cy="28"
                             r="22"
-                            className="text-slate-100"
+                            className="text-white/20"
                             strokeWidth="4"
                             stroke="currentColor"
                             fill="transparent"
@@ -976,7 +1246,7 @@ export default function AdminDashboard() {
                             cx="28"
                             cy="28"
                             r="22"
-                            className="text-blue-650 transition-all duration-500 ease-out"
+                            className="text-white transition-all duration-500 ease-out"
                             strokeWidth="4"
                             strokeDasharray={2 * Math.PI * 22}
                             strokeDashoffset={(2 * Math.PI * 22) - (stats.overview.collectionPercentage / 100) * (2 * Math.PI * 22)}
@@ -985,104 +1255,67 @@ export default function AdminDashboard() {
                             fill="transparent"
                           />
                         </svg>
-                        <div className="absolute inset-0 flex items-center justify-center text-[10px]">
-                          📊
+                        <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white">
+                          %
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Itemized Dues and collections chart mock */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm">
-                      <h4 className="font-bold text-slate-800 text-sm mb-4">
-                        {lang === "mr" ? "कर प्रकारानुसार आकडेवारी" : "Tax Type Statistics"}
-                      </h4>
-                      <div className="space-y-3.5">
-                        <ProgressBarItem title={lang === "mr" ? "घरपट्टी (House Tax)" : "House Tax"} collected={stats.taxBreakdown.houseTax.collected} pending={stats.taxBreakdown.houseTax.pending} />
-                        <ProgressBarItem title={lang === "mr" ? "पाणीपट्टी (Water Tax)" : "Water Tax"} collected={stats.taxBreakdown.waterTax.collected} pending={stats.taxBreakdown.waterTax.pending} />
-                      </div>
-                    </div>
-
-                    <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between">
-                      <h4 className="font-bold text-slate-800 text-sm mb-4">
-                        {lang === "mr" ? "भरणा पद्धती (Payment Methods)" : "Payment Methods"}
-                      </h4>
-                      <div className="space-y-4">
-                        <div className="flex justify-between items-center text-sm">
-                          <span className="text-slate-500">
-                            {lang === "mr" ? "💻 ऑनलाइन पेमेंट (Gateway):" : "💻 Online Payment (Gateway):"}
-                          </span>
-                          <span className="font-bold text-slate-800">
-                            {stats.paymentMethods.online} {lang === "mr" ? "व्यवहार" : "Txns"}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center text-sm">
-                          <span className="text-slate-500">
-                            {lang === "mr" ? "💵 रोख भरणा (Cash):" : "💵 Cash Payment:"}
-                          </span>
-                          <span className="font-bold text-slate-800">
-                            {stats.paymentMethods.cash} {lang === "mr" ? "व्यवहार" : "Txns"}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center text-sm">
-                          <span className="text-slate-500">
-                            {lang === "mr" ? "📱 UPI पेमेंट:" : "📱 UPI Payment:"}
-                          </span>
-                          <span className="font-bold text-slate-800">
-                            {stats.paymentMethods.upi} {lang === "mr" ? "व्यवहार" : "Txns"}
-                          </span>
+                  {/* Main Grid Wrapper for Left Column and Right Sidebar */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    
+                    {/* Left Column (lg:col-span-2) */}
+                    <div className="lg:col-span-2 space-y-6">
+                      
+                      {/* Tax Type Statistics (Full Width) */}
+                      <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm">
+                        <h4 className="font-bold text-slate-800 text-sm mb-4">
+                          {lang === "mr" ? "कर प्रकारानुसार आकडेवारी" : "Tax Type Statistics"}
+                        </h4>
+                        <div className="space-y-3.5">
+                          <ProgressBarItem title={lang === "mr" ? "घरपट्टी (House Tax)" : "House Tax"} collected={stats.taxBreakdown.houseTax.collected} pending={stats.taxBreakdown.houseTax.pending} />
+                          <ProgressBarItem title={lang === "mr" ? "पाणीपट्टी (Water Tax)" : "Water Tax"} collected={stats.taxBreakdown.waterTax.collected} pending={stats.taxBreakdown.waterTax.pending} />
                         </div>
                       </div>
-                      <div className="border-t border-slate-100 mt-4 pt-4 flex justify-between items-center text-xs">
-                        <span className="text-slate-400">
-                          {lang === "mr" ? "एकूण व्यवहार संख्या:" : "Total Transactions:"}
-                        </span>
-                        <span className="font-bold text-slate-700">{stats.paymentMethods.totalTransactions}</span>
+
+                      {/* Ward wise Breakdown Table */}
+                      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+                        <div className="p-5 border-b border-slate-100">
+                          <h4 className="font-bold text-slate-800 text-sm">
+                            {lang === "mr" ? "प्रभागनिहाय वसुली अहवाल (Ward-wise Summary)" : "Ward-wise Summary Report"}
+                          </h4>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead>
+                              <tr className="bg-slate-50 text-slate-400 font-semibold border-b border-slate-100">
+                                <th className="p-4">{lang === "mr" ? "प्रभाग क्रमांक" : "Ward Number"}</th>
+                                <th className="p-4 text-center">{lang === "mr" ? "एकूण कुटुंबे (Properties)" : "Total Properties"}</th>
+                                <th className="p-4 text-center">{lang === "mr" ? "थकबाकीदार कुटुंबे" : "Defaulter Families"}</th>
+                                <th className="p-4 text-right">{lang === "mr" ? "संकलित कर" : "Collected Tax"}</th>
+                                <th className="p-4 text-right">{lang === "mr" ? "थकबाकी" : "Outstanding Dues"}</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {stats.wardStats.map((w) => (
+                                <tr key={w.wardNo} className="hover:bg-slate-50/50">
+                                  <td className="p-4 font-bold text-slate-800">
+                                    {lang === "mr" ? `प्रभाग क्रमांक ${w.wardNo}` : `Ward No. ${w.wardNo}`}
+                                  </td>
+                                  <td className="p-4 text-center font-semibold text-slate-600">{w.totalProperties}</td>
+                                  <td className="p-4 text-center font-semibold text-orange-600">{w.propertiesWithDues}</td>
+                                  <td className="p-4 text-right font-bold text-green-600">₹{w.totalCollected.toLocaleString("mr-IN")}</td>
+                                  <td className="p-4 text-right font-bold text-orange-600">₹{w.totalDue.toLocaleString("mr-IN")}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
-                    </div>
-                  </div>
 
-                  {/* Ward wise Breakdown Table */}
-                  <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-                    <div className="p-5 border-b border-slate-100">
-                      <h4 className="font-bold text-slate-800 text-sm">
-                        {lang === "mr" ? "प्रभागनिहाय वसुली अहवाल (Ward-wise Summary)" : "Ward-wise Summary Report"}
-                      </h4>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs">
-                        <thead>
-                          <tr className="bg-slate-50 text-slate-400 font-semibold border-b border-slate-100">
-                            <th className="p-4">{lang === "mr" ? "प्रभाग क्रमांक" : "Ward Number"}</th>
-                            <th className="p-4 text-center">{lang === "mr" ? "एकूण कुटुंबे (Properties)" : "Total Properties"}</th>
-                            <th className="p-4 text-center">{lang === "mr" ? "थकबाकीदार कुटुंबे" : "Defaulter Families"}</th>
-                            <th className="p-4 text-right">{lang === "mr" ? "संकलित कर" : "Collected Tax"}</th>
-                            <th className="p-4 text-right">{lang === "mr" ? "थकबाकी" : "Outstanding Dues"}</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {stats.wardStats.map((w) => (
-                            <tr key={w.wardNo} className="hover:bg-slate-50/50">
-                              <td className="p-4 font-bold text-slate-800">
-                                {lang === "mr" ? `प्रभाग क्रमांक ${w.wardNo}` : `Ward No. ${w.wardNo}`}
-                              </td>
-                              <td className="p-4 text-center font-semibold text-slate-600">{w.totalProperties}</td>
-                              <td className="p-4 text-center font-semibold text-orange-600">{w.propertiesWithDues}</td>
-                              <td className="p-4 text-right font-bold text-green-600">₹{w.totalCollected.toLocaleString("mr-IN")}</td>
-                              <td className="p-4 text-right font-bold text-orange-600">₹{w.totalDue.toLocaleString("mr-IN")}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  {/* Recent Activity and Quick Actions */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {/* Recent Transactions Activity Feed */}
-                    <div className="md:col-span-2 bg-white rounded-3xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between">
-                      <div>
+                      {/* Recent Transactions Activity Feed */}
+                      <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm">
                         <h4 className="font-bold text-slate-800 text-sm mb-4">
                           {lang === "mr" ? "नुकतेच झालेले कर भरणा व्यवहार" : "Recent Tax Payments"}
                         </h4>
@@ -1128,9 +1361,50 @@ export default function AdminDashboard() {
                       </div>
                     </div>
 
-                    {/* Top 5 Defaulters Quick View */}
-                    <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between">
-                      <div>
+                    {/* Right Column / Sidebar (lg:col-span-1) */}
+                    <div className="lg:col-span-1 space-y-6">
+                      
+                      {/* Payment Methods */}
+                      <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm flex flex-col justify-between">
+                        <h4 className="font-bold text-slate-800 text-sm mb-4">
+                          {lang === "mr" ? "भरणा पद्धती (Payment Methods)" : "Payment Methods"}
+                        </h4>
+                        <div className="space-y-4">
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="text-slate-500">
+                              {lang === "mr" ? "💻 ऑनलाइन पेमेंट (Gateway):" : "💻 Online Payment (Gateway):"}
+                            </span>
+                            <span className="font-bold text-slate-700 bg-slate-50 p-1 px-2.5 rounded-lg border border-slate-100">
+                              {stats.paymentMethods.online} {lang === "mr" ? "व्यवहार" : "Txns"}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="text-slate-500">
+                              {lang === "mr" ? "💵 रोख भरणा (Cash):" : "💵 Cash Payment:"}
+                            </span>
+                            <span className="font-bold text-slate-700 bg-slate-50 p-1 px-2.5 rounded-lg border border-slate-100">
+                              {stats.paymentMethods.cash} {lang === "mr" ? "व्यवहार" : "Txns"}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="text-slate-500">
+                              {lang === "mr" ? "📱 UPI पेमेंट:" : "📱 UPI Payment:"}
+                            </span>
+                            <span className="font-bold text-slate-700 bg-slate-50 p-1 px-2.5 rounded-lg border border-slate-100">
+                              {stats.paymentMethods.upi} {lang === "mr" ? "व्यवहार" : "Txns"}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="border-t border-slate-100 mt-4 pt-4 flex justify-between items-center text-xs">
+                          <span className="text-slate-400">
+                            {lang === "mr" ? "एकूण व्यवहार संख्या:" : "Total Transactions:"}
+                          </span>
+                          <span className="font-extrabold text-slate-800">{stats.paymentMethods.totalTransactions}</span>
+                        </div>
+                      </div>
+
+                      {/* Top 5 Defaulters */}
+                      <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm">
                         <h4 className="font-bold text-slate-800 text-sm mb-4">
                           {lang === "mr" ? "शीर्ष ५ थकबाकीदार (Top 5 Defaulters)" : "Top 5 Defaulters"}
                         </h4>
@@ -1142,7 +1416,7 @@ export default function AdminDashboard() {
                                   <div className="flex items-center gap-1.5">
                                     <span className="font-mono font-bold text-slate-800">{def.propertyNo}</span>
                                     <span className="text-slate-400">•</span>
-                                    <span className="font-semibold text-slate-600">{def.ownerName}</span>
+                                    <span className="font-semibold text-slate-600 truncate max-w-[100px] block" title={def.ownerName}>{def.ownerName}</span>
                                   </div>
                                   <div className="text-[10px] text-slate-400">
                                     {lang === "mr" ? `प्रभाग ${def.wardNo}` : `Ward ${def.wardNo}`}
@@ -1218,21 +1492,6 @@ export default function AdminDashboard() {
 
                       {/* Dropdown Filters */}
                       <div className="flex items-center gap-2 flex-wrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                            {lang === "mr" ? "थकबाकी:" : "Dues:"}
-                          </span>
-                          <select
-                            value={defaulterDuesFilter}
-                            onChange={(e) => setDefaulterDuesFilter(e.target.value)}
-                            className="h-9.5 px-3 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-slate-400 cursor-pointer transition-colors"
-                          >
-                            <option value="all">{lang === "mr" ? "सर्व थकबाकी" : "All Dues"}</option>
-                            <option value="above_5000">{lang === "mr" ? "थकबाकी > ₹५,०००" : "Dues > ₹5,000"}</option>
-                            <option value="above_10000">{lang === "mr" ? "थकबाकी > ₹१०,०००" : "Dues > ₹10,000"}</option>
-                          </select>
-                        </div>
-
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                             {lang === "mr" ? "क्रमवारी:" : "Sort:"}
@@ -1596,22 +1855,6 @@ export default function AdminDashboard() {
 
                       {/* Dropdowns */}
                       <div className="flex items-center gap-2 flex-wrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                            {lang === "mr" ? "कर थकबाकी:" : "Tax Dues:"}
-                          </span>
-                          <select
-                            value={propertyDuesFilter}
-                            onChange={(e) => setPropertyDuesFilter(e.target.value)}
-                            className="h-9.5 px-3 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:border-slate-400 cursor-pointer transition-colors"
-                          >
-                            <option value="all">{lang === "mr" ? "सर्व थकबाकी" : "All Dues"}</option>
-                            <option value="above_5000">{lang === "mr" ? "थकबाकी > ₹५,०००" : "Dues > ₹5,000"}</option>
-                            <option value="above_10000">{lang === "mr" ? "थकबाकी > ₹१०,०००" : "Dues > ₹10,000"}</option>
-                            <option value="paid_up">{lang === "mr" ? "पूर्ण भरलेले" : "Paid Up"}</option>
-                          </select>
-                        </div>
-
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                             {lang === "mr" ? "क्रमवारी:" : "Sort:"}
@@ -1989,9 +2232,7 @@ export default function AdminDashboard() {
                           <tr className="bg-slate-50 border-b border-slate-100 text-slate-400 font-semibold uppercase">
                             <th className="p-3">{lang === "mr" ? "आर्थिक वर्ष" : "FY"}</th>
                             <th className="p-3 text-right">{lang === "mr" ? "घरपट्टी आकारणी" : "House Assessed"}</th>
-                            <th className="p-3 text-right">{lang === "mr" ? "घरपट्टी जमा" : "House Paid"}</th>
                             <th className="p-3 text-right">{lang === "mr" ? "पाणीपट्टी आकारणी" : "Water Assessed"}</th>
-                            <th className="p-3 text-right">{lang === "mr" ? "पाणीपट्टी जमा" : "Water Paid"}</th>
                             <th className="p-3 text-right">{lang === "mr" ? "एकूण थकबाकी" : "Total Due"}</th>
                           </tr>
                         </thead>
@@ -2002,9 +2243,7 @@ export default function AdminDashboard() {
                               <tr key={yd.financialYear} className="hover:bg-slate-50/50">
                                 <td className="p-3 font-semibold text-slate-700">{yd.financialYear}</td>
                                 <td className="p-3 text-right text-slate-600">₹{yd.houseTaxAssessed.toFixed(2)}</td>
-                                <td className="p-3 text-right text-green-600">₹{yd.houseTaxPaid.toFixed(2)}</td>
                                 <td className="p-3 text-right text-slate-600">₹{yd.waterTaxAssessed.toFixed(2)}</td>
-                                <td className="p-3 text-right text-green-600">₹{yd.waterTaxPaid.toFixed(2)}</td>
                                 <td className={`p-3 text-right font-bold ${totalDue > 0 ? "text-orange-600" : "text-green-600"}`}>
                                   ₹{totalDue.toFixed(2)}
                                 </td>
@@ -2646,24 +2885,27 @@ function SidebarBtn({
   active,
   onClick,
   icon,
-  label
+  label,
+  sidebarOpen = true
 }: {
   active: boolean;
   onClick: () => void;
   icon: string;
   label: string;
+  sidebarOpen?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2.5 cursor-pointer ${
+      className={`w-full text-left px-3 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2.5 cursor-pointer ${
         active
-          ? "bg-slate-900 text-white shadow-md shadow-slate-900/10"
-          : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
-      }`}
+          ? "bg-sky-500 text-white shadow-sm shadow-sky-500/10"
+          : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
+      } ${!sidebarOpen ? "justify-center px-1" : ""}`}
+      title={!sidebarOpen ? label : undefined}
     >
       <span className="text-sm shrink-0">{icon}</span>
-      <span>{label}</span>
+      {sidebarOpen && <span className="truncate">{label}</span>}
     </button>
   );
 }
@@ -2675,6 +2917,7 @@ function StatsCard({
   borderColor,
   bgColor,
   textColor,
+  labelColor = "text-slate-400",
   icon
 }: {
   label: string;
@@ -2682,15 +2925,16 @@ function StatsCard({
   borderColor: string;
   bgColor: string;
   textColor: string;
-  icon: string;
+  labelColor?: string;
+  icon: React.ReactNode;
 }) {
   return (
     <div className={`p-4 rounded-3xl shadow-sm border-l-4 ${borderColor} ${bgColor} flex flex-col justify-between transition-all duration-300 hover:shadow-md border border-slate-100`}>
       <div className="flex justify-between items-start gap-2">
-        <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">{label}</span>
+        <span className={`text-[10px] font-extrabold uppercase tracking-wider ${labelColor}`}>{label}</span>
         <span className="text-sm shrink-0">{icon}</span>
       </div>
-      <span className={`text-lg md:text-xl font-extrabold mt-3 tracking-tight ${textColor}`}>{val}</span>
+      <span className={`text-2xl md:text-3xl font-extrabold mt-3 tracking-tight ${textColor}`}>{val}</span>
     </div>
   );
 }

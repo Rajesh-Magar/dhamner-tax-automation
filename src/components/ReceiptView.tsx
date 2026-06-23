@@ -34,6 +34,8 @@ interface ReceiptViewProps {
 const taxNames: Record<string, string> = {
   house_tax: "घरपट्टी (House Tax)",
   water_tax: "पाणीपट्टी (Water Tax)",
+  sanitary_tax: "सॅनिटरी कर (Sanitary Tax)",
+  light_tax: "दिवाबत्ती कर (Light Tax)",
 };
 
 export default function ReceiptView({ isOpen, onClose, transaction, propertyData }: ReceiptViewProps) {
@@ -48,16 +50,15 @@ export default function ReceiptView({ isOpen, onClose, transaction, propertyData
 
   const handlePrint = () => {
     const printContent = printAreaRef.current?.innerHTML;
-    const originalContent = document.body.innerHTML;
 
     if (printContent) {
-      // Create a print window or style override
+      // Create print style override
       const style = document.createElement("style");
       style.innerHTML = `
         @media print {
           body * { visibility: hidden; }
           .print-area, .print-area * { visibility: visible; }
-          .print-area { position: absolute; left: 0; top: 0; width: 100%; }
+          .print-area { position: absolute; left: 0; top: 0; width: 100%; height: auto !important; overflow: visible !important; }
           .no-print { display: none !important; }
         }
       `;
@@ -68,26 +69,29 @@ export default function ReceiptView({ isOpen, onClose, transaction, propertyData
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm overflow-y-auto">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm overflow-hidden">
+      {/* Backdrop click closer */}
+      <div className="absolute inset-0" onClick={onClose} />
+
       {/* Container */}
-      <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden transform transition-all my-8 animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative w-full max-w-2xl flex flex-col bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200">
         
         {/* Header Bar (Hidden on print) */}
-        <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between no-print">
+        <div className="flex-shrink-0 bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between no-print">
           <div>
-            <h3 className="font-bold text-base">कर भरणा पावती (Tax Receipt)</h3>
+            <h3 className="font-bold text-sm">कर भरणा पावती (Tax Receipt)</h3>
             <p className="text-slate-400 text-xs font-mono">{transaction.transactionId}</p>
           </div>
           <div className="flex gap-2">
             <button
               onClick={handlePrint}
-              className="px-3.5 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-orange-500/10 cursor-pointer"
+              className="px-3.5 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-orange-500/10 cursor-pointer transition-all active:scale-95"
             >
               🖨️ प्रिंट (Print)
             </button>
             <button
               onClick={onClose}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold cursor-pointer"
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold cursor-pointer transition-all active:scale-95"
             >
               बंद करा (Close)
             </button>
@@ -95,7 +99,7 @@ export default function ReceiptView({ isOpen, onClose, transaction, propertyData
         </div>
 
         {/* Receipt Page Body */}
-        <div className="p-8 md:p-12 print-area" ref={printAreaRef}>
+        <div className="p-6 md:p-8 max-h-[70vh] md:max-h-[75vh] overflow-y-auto print-area bg-white custom-scrollbar" ref={printAreaRef}>
           <div className="border-4 border-double border-slate-850 p-6 rounded-lg bg-amber-50/20 relative">
             
             {/* Watermark Logo */}
@@ -224,13 +228,13 @@ export default function ReceiptView({ isOpen, onClose, transaction, propertyData
         </div>
 
         {/* Footer (Hidden on print) */}
-        <div className="bg-slate-50 border-t border-slate-100 px-6 py-4 flex justify-between items-center no-print">
-          <span className="text-[11px] text-slate-400">
+        <div className="flex-shrink-0 bg-slate-50 border-t border-slate-100 px-6 py-4 flex justify-between items-center no-print">
+          <span className="text-[11px] text-slate-400 font-medium">
             * ही संगणक जनरेट केलेली पावती आहे, स्वाक्षरीची आवश्यकता नाही.
           </span>
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+            className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer active:scale-95"
           >
             बंद करा (Close)
           </button>
